@@ -16,7 +16,7 @@ export default function Footer() {
   return (
     <footer className="relative overflow-hidden mt-auto bg-[#161138] text-[rgba(255,255,255,0.5)] border-t border-[rgba(255,255,255,0.06)] before:content-[''] before:absolute before:inset-0 before:bg-[radial-gradient(ellipse_at_bottom_left,rgba(226,30,83,0.06)_0%,transparent_65%)] before:pointer-events-none">
       {/* 3-column inner */}
-      <div className="relative max-w-7xl mx-auto px-8 pt-8 pb-6 grid grid-cols-1 sm:grid-cols-[1.4fr_1fr_1fr] gap-8">
+      <div className="relative max-w-7xl mx-auto pt-8 pb-6 grid grid-cols-1 sm:grid-cols-[1.4fr_1fr_1fr] gap-8">
         {/* Brand col */}
         <div className="flex flex-col gap-[0.8rem]">
           <div className="flex items-center gap-[0.6rem]">

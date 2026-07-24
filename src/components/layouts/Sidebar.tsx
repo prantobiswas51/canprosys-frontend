@@ -1,4 +1,5 @@
 import { NavLink } from 'react-router-dom';
+import { useAuth } from '../../context/AuthContext';
 
 const navBtnBase =
   'relative w-full flex items-center gap-3 whitespace-nowrap rounded-xl px-[1.15rem] py-[0.85rem] text-[0.9rem] font-semibold cursor-pointer transition-all duration-200 ease-in-out shadow-[0_1px_2px_0_rgba(0,0,0,0.05)]';
@@ -40,6 +41,7 @@ interface NavItem {
   label: string;
   path: string;
   badge?: number;
+  superAdminOnly?: boolean;
 }
 
 interface NavGroup {
@@ -76,6 +78,7 @@ const navGroups: NavGroup[] = [
   {
     label: 'Settings & Admin',
     items: [
+      { icon: 'fa-list-check', label: 'Role Management', path: '/manage-roles', superAdminOnly: true },
       { icon: 'fa-sliders', label: 'Recipes', path: '/recipes' },
       { icon: 'fa-truck', label: 'Transport Management', path: '/transport' },
       { icon: 'fa-shield-halved', label: 'Approval Queue', path: '/approvals', badge: 3 },
@@ -86,14 +89,21 @@ const navGroups: NavGroup[] = [
 ];
 
 export default function Sidebar() {
+  const { user } = useAuth();
+  const isSuperAdmin = user?.role?.name === 'super_admin';
+
   return (
     <aside className="sticky top-[4.5rem] flex h-fit flex-col gap-[0.1rem] self-start">
-      {navGroups.map((group) => (
+      {navGroups.map((group) => {
+        const visibleItems = group.items.filter((item) => !item.superAdminOnly || isSuperAdmin);
+        if (visibleItems.length === 0) return null;
+
+        return (
         <div key={group.label} className="flex flex-col gap-[0.15rem] mb-[0.4rem]">
           <span className="block px-[0.85rem] pb-[0.15rem] pt-[0.4rem] text-[0.6rem] font-extrabold uppercase tracking-[0.1em] text-[#545454] opacity-60">
             {group.label}
           </span>
-          {group.items.map((item) => (
+          {visibleItems.map((item) => (
             <NavLink
               key={item.label}
               to={item.path}
@@ -113,7 +123,8 @@ export default function Sidebar() {
             </NavLink>
           ))}
         </div>
-      ))}
+        );
+      })}
 
       {/* Sidebar footer user card */}
       <div className="mt-4 flex items-center gap-[0.6rem] rounded-xl border border-[rgba(226,30,83,0.12)] bg-[rgba(226,30,83,0.04)] p-3">

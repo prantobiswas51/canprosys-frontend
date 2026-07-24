@@ -1,5 +1,8 @@
 import { Routes, Route } from 'react-router-dom'
 import MainLayout from './components/layouts/MainLayout'
+import GuestLayout from './components/layouts/GuestLayout'
+import RequireAuth from './components/layouts/RequireAuth'
+import Login from './components/layouts/Login'
 import Dashboard from './pages/Dashboard'
 import Task from './pages/Task'
 import DailyEntry from './pages/DailyEntry'
@@ -10,6 +13,7 @@ import WasteManagement from './pages/WasteManagement'
 import Payroll from './pages/Payroll'
 import EmployeeDashboard from './pages/EmployeeDashboard'
 import Employees from './pages/Employees'
+import RoleManagement from './pages/RoleManagement'
 import Recipes from './pages/Recipes'
 import TransportManagement from './pages/TransportManagement'
 import ApprovalQueue from './pages/ApprovalQueue'
@@ -19,6 +23,10 @@ import UserManual from './pages/UserManual'
 function App() {
   return (
     <Routes>
+      <Route element={<GuestLayout />}>
+        <Route path="/login" element={<Login />} />
+      </Route>
+      <Route element={<RequireAuth />}>
       <Route element={<MainLayout />}>
         <Route path="/" element={<Dashboard />} />
         <Route path="/tasks" element={<Task />} />
@@ -30,11 +38,13 @@ function App() {
         <Route path="/payroll" element={<Payroll />} />
         <Route path="/employee-dashboard" element={<EmployeeDashboard />} />
         <Route path="/employees" element={<Employees />} />
+        <Route path="/manage-roles" element={<RoleManagement />} />
         <Route path="/recipes" element={<Recipes />} />
         <Route path="/transport" element={<TransportManagement />} />
         <Route path="/approvals" element={<ApprovalQueue />} />
         <Route path="/settings" element={<SystemSettings />} />
         <Route path="/user-manual" element={<UserManual />} />
+      </Route>
       </Route>
     </Routes>
   )

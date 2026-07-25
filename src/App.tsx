@@ -10,7 +10,7 @@ import ActivityLogs from './pages/ActivityLogs'
 import Inventory from './pages/Inventory'
 import FinishedProducts from './pages/FinishedProducts'
 import WasteManagement from './pages/WasteManagement'
-import Payroll from './pages/Payroll'
+import Payouts from './pages/Payouts'
 import EmployeeDashboard from './pages/EmployeeDashboard'
 import Employees from './pages/Employees'
 import RoleManagement from './pages/RoleManagement'
@@ -35,7 +35,7 @@ function App() {
         <Route path="/inventory" element={<Inventory />} />
         <Route path="/finished-products" element={<FinishedProducts />} />
         <Route path="/waste-management" element={<WasteManagement />} />
-        <Route path="/payroll" element={<Payroll />} />
+        <Route path="/payouts" element={<Payouts />} />
         <Route path="/employee-dashboard" element={<EmployeeDashboard />} />
         <Route path="/employees" element={<Employees />} />
         <Route path="/manage-roles" element={<RoleManagement />} />

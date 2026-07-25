@@ -119,7 +119,7 @@ export default function Task() {
                     {task.name}
                   </span>
                   <span className="text-[0.7rem] font-bold text-[#545454]">
-                    ${task.pricePerUnit} / unit
+                    <span className="text-xl font-bold">৳</span> {task.pricePerUnit} / unit
                   </span>
                 </div>
               ))}

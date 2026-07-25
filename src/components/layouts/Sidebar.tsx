@@ -70,7 +70,7 @@ const navGroups: NavGroup[] = [
   {
     label: 'Team',
     items: [
-      { icon: 'fa-wallet', label: 'Payroll', path: '/payroll' },
+      { icon: 'fa-wallet', label: 'Payouts', path: '/payouts' },
       { icon: 'fa-users-gear', label: 'Employee Dashboard', path: '/employee-dashboard' },
       { icon: 'fa-user-group', label: 'Employees', path: '/employees' },
     ],

@@ -50,6 +50,7 @@ export default function Header() {
                     <div className="py-2 flex items-center gap-[0.45rem] text-[#545454] dark:text-white/60 text-[0.8rem] font-bold bg-[rgba(22,17,56,0.04)] dark:bg-white/5 border border-[rgba(22,17,56,0.08)] dark:border-white/10 px-[0.85rem] rounded-full">
                         <i className="fa-regular fa-calendar-days text-[#e21e53]" />
                         <span>{new Date().toLocaleDateString('en-US', {
+                            timeZone: 'Asia/Dhaka',
                             weekday: 'short',
                             month: 'short',
                             day: 'numeric',

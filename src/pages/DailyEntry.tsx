@@ -240,6 +240,7 @@ export default function DailyEntry() {
                     <td className="py-3 pr-4 text-[#545454]">{entry.weightKg} kg</td>
                     <td className="py-3 pr-4 text-[#545454]">
                       {new Date(entry.createdAt).toLocaleString('en-US', {
+                        timeZone: 'Asia/Dhaka',
                         month: 'short',
                         day: 'numeric',
                         year: 'numeric',

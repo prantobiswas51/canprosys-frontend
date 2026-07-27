@@ -7,6 +7,7 @@ const API_URL = import.meta.env.VITE_API_URL;
 interface TaskOption {
   id: number;
   name: string;
+  slug: string;
   pricePerUnit: number;
 }
 
@@ -15,13 +16,24 @@ interface EmployeeOption {
   name: string;
 }
 
+interface RecipeOption {
+  id: number;
+  product: string;
+  sizeNameEnglish: string;
+}
+
 interface DailyEntryRecord {
   id: number;
   task: TaskOption;
   employees: EmployeeOption[];
   weightKg: number;
+  productName?: string;
   createdAt: string;
 }
+
+// Raw material prep tasks -- no product has been chosen yet at this stage,
+// so the Product Name field doesn't apply to them.
+const PRODUCT_NOT_APPLICABLE_SLUGS = ['wood_slicing', 'corner_cutting'];
 
 const inputClass =
   'w-full bg-white border border-[#e8e8e8] text-[#1E1E1E] px-[0.85rem] py-[0.65rem] rounded-lg text-[0.875rem] font-medium transition-all duration-200 outline-none focus:border-[#e21e53] focus:shadow-[0_0_0_3px_rgba(16,185,129,0.15)] disabled:opacity-60 disabled:cursor-not-allowed';
@@ -32,6 +44,7 @@ const cardClass =
 export default function DailyEntry() {
   const [tasks, setTasks] = useState<TaskOption[]>([]);
   const [employees, setEmployees] = useState<EmployeeOption[]>([]);
+  const [recipes, setRecipes] = useState<RecipeOption[]>([]);
   const [entries, setEntries] = useState<DailyEntryRecord[]>([]);
 
   const [loadingOptions, setLoadingOptions] = useState(false);
@@ -42,6 +55,7 @@ export default function DailyEntry() {
   const [taskId, setTaskId] = useState('');
   const [employeeIds, setEmployeeIds] = useState<number[]>([]);
   const [weightKg, setWeightKg] = useState('');
+  const [recipeId, setRecipeId] = useState('');
 
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -51,12 +65,14 @@ export default function DailyEntry() {
     setLoadingOptions(true);
     setOptionsError(null);
     try {
-      const [tasksRes, employeesRes] = await Promise.all([
+      const [tasksRes, employeesRes, recipesRes] = await Promise.all([
         axios.get<TaskOption[]>(`${API_URL}/tasks`),
         axios.get<EmployeeOption[]>(`${API_URL}/employees`),
+        axios.get<RecipeOption[]>(`${API_URL}/recipes`),
       ]);
       setTasks(tasksRes.data);
       setEmployees(employeesRes.data);
+      setRecipes(recipesRes.data);
     } catch (err) {
       setOptionsError(
         axios.isAxiosError(err) && err.response
@@ -92,6 +108,14 @@ export default function DailyEntry() {
     loadEntries();
   }, [loadOptions, loadEntries]);
 
+  const selectedTask = tasks.find((t) => String(t.id) === taskId);
+  const isProductApplicable = !!selectedTask && !PRODUCT_NOT_APPLICABLE_SLUGS.includes(selectedTask.slug);
+
+  const handleTaskChange = (value: string) => {
+    setTaskId(value);
+    setRecipeId('');
+  };
+
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setFormError(null);
@@ -102,17 +126,24 @@ export default function DailyEntry() {
       return;
     }
 
+    if (isProductApplicable && !recipeId) {
+      setFormError('Select a product for this task.');
+      return;
+    }
+
     setSubmitting(true);
     try {
       await axios.post(`${API_URL}/daily-entries`, {
         taskId: Number(taskId),
         employeeIds,
         weightKg: Number(weightKg),
+        recipeId: isProductApplicable ? Number(recipeId) : undefined,
       });
       setSuccess(true);
       setTaskId('');
       setEmployeeIds([]);
       setWeightKg('');
+      setRecipeId('');
       loadEntries();
     } catch (err) {
       setFormError(
@@ -142,12 +173,13 @@ export default function DailyEntry() {
 
         {optionsError && <p className="mb-3 text-[0.8rem] font-semibold text-[#ef4444]">{optionsError}</p>}
 
-        <form onSubmit={handleSubmit} className="grid grid-cols-1 gap-4 md:grid-cols-[1fr_1fr_160px_140px] md:items-end">
-          <div className="flex flex-col gap-[0.4rem]">
+        <form onSubmit={handleSubmit} className="flex flex-wrap gap-4 md:items-end">
+          <div className="flex flex-col gap-[0.4rem] flex-1 min-w-[180px]">
             <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Task Name</label>
+
             <select
               value={taskId}
-              onChange={(e) => setTaskId(e.target.value)}
+              onChange={(e) => handleTaskChange(e.target.value)}
               required
               disabled={loadingOptions || submitting}
               className={inputClass}
@@ -163,7 +195,29 @@ export default function DailyEntry() {
             </select>
           </div>
 
-          <div className="flex flex-col gap-[0.4rem]">
+          {isProductApplicable && (
+            <div className="flex flex-col gap-[0.4rem] flex-1 min-w-[180px]">
+              <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Product Name</label>
+              <select
+                value={recipeId}
+                onChange={(e) => setRecipeId(e.target.value)}
+                required
+                disabled={loadingOptions || submitting}
+                className={inputClass}
+              >
+                <option value="" disabled>
+                  Select a product...
+                </option>
+                {recipes.map((recipe) => (
+                  <option key={recipe.id} value={recipe.id}>
+                    {recipe.product} ({recipe.sizeNameEnglish})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          <div className="flex flex-col gap-[0.4rem] flex-1 min-w-[180px]">
             <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Select Artisan</label>
             <MultiSelect
               options={employees.map((employee) => ({ id: employee.id, label: employee.name }))}
@@ -174,8 +228,8 @@ export default function DailyEntry() {
             />
           </div>
 
-          <div className="flex flex-col gap-[0.4rem]">
-            <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Weight (kg)</label>
+          <div className="flex flex-col gap-[0.4rem] w-full sm:w-[160px]">
+            <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Unit (kg/Pieces)</label>
             <input
               type="number"
               step="any"
@@ -191,7 +245,7 @@ export default function DailyEntry() {
           <button
             type="submit"
             disabled={submitting || loadingOptions}
-            className="h-10 flex items-center justify-center gap-2 rounded-lg bg-[#e21e53] text-white font-bold text-[0.875rem] transition-all duration-200 hover:bg-[#c01745] hover:-translate-y-px hover:shadow-[0_6px_14px_rgba(226,30,83,0.25)] active:translate-y-0 disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:translate-y-0 disabled:hover:shadow-none cursor-pointer"
+            className="h-10 w-full sm:w-[140px] flex items-center justify-center gap-2 rounded-lg bg-[#e21e53] text-white font-bold text-[0.875rem] transition-all duration-200 hover:bg-[#c01745] hover:-translate-y-px hover:shadow-[0_6px_14px_rgba(226,30,83,0.25)] active:translate-y-0 disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:translate-y-0 disabled:hover:shadow-none cursor-pointer"
           >
             <i className={`fa-solid ${submitting ? 'fa-spinner fa-spin' : 'fa-save'}`} />
             {submitting ? 'Saving...' : 'Add Entry'}
@@ -225,8 +279,9 @@ export default function DailyEntry() {
               <thead>
                 <tr className="border-b border-[#e8e8e8] text-[0.72rem] uppercase tracking-[0.05em] text-[#545454]">
                   <th className="py-2 pr-4 font-bold">Task Name</th>
+                  <th className="py-2 pr-4 font-bold">Recipe</th>
                   <th className="py-2 pr-4 font-bold">Artisan(s)</th>
-                  <th className="py-2 pr-4 font-bold">Weight (kg)</th>
+                  <th className="py-2 pr-4 font-bold text-center">Unit (Kg/Pieces)</th>
                   <th className="py-2 pr-4 font-bold">Created At</th>
                 </tr>
               </thead>
@@ -234,10 +289,11 @@ export default function DailyEntry() {
                 {entries.map((entry) => (
                   <tr key={entry.id} className="border-b border-[#f1f1f1] last:border-0">
                     <td className="py-3 pr-4 font-bold text-[#1E1E1E]">{entry.task?.name ?? '—'}</td>
+                    <td className="py-3 pr-4 text-[#545454]">{entry.productName ?? '—'}</td>
                     <td className="py-3 pr-4 text-[#545454]">
                       {entry.employees?.map((emp) => emp.name).join(', ') || '—'}
                     </td>
-                    <td className="py-3 pr-4 text-[#545454]">{entry.weightKg} kg</td>
+                    <td className="py-3 pr-4 text-[#545454] text-center">{entry.weightKg}</td>
                     <td className="py-3 pr-4 text-[#545454]">
                       {new Date(entry.createdAt).toLocaleString('en-US', {
                         timeZone: 'Asia/Dhaka',

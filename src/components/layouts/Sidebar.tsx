@@ -62,7 +62,7 @@ const navGroups: NavGroup[] = [
   {
     label: 'Stock',
     items: [
-      { icon: 'fa-warehouse', label: 'Inventory', path: '/inventory' },
+      { icon: 'fa-warehouse', label: 'Raw Materials Inventory', path: '/inventory' },
       { icon: 'fa-boxes-packing', label: 'Finished Products', path: '/finished-products' },
       { icon: 'fa-dumpster', label: 'Waste Management', path: '/waste-management' },
     ],

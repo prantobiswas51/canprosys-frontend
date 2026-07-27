@@ -7,7 +7,7 @@ const API_URL = import.meta.env.VITE_API_URL;
 interface Recipe {
   id: number;
   product: string;
-  sizeId: string;
+  sku: string;
   sizeNameBengali: string;
   sizeNameEnglish: string;
   woodKg: string;
@@ -24,7 +24,7 @@ type RecipeFormState = Omit<Recipe, 'id'>;
 
 const emptyForm: RecipeFormState = {
   product: '',
-  sizeId: '',
+  sku: '',
   sizeNameBengali: '',
   sizeNameEnglish: '',
   woodKg: '',
@@ -89,7 +89,7 @@ export default function Recipes() {
     setEditingId(recipe.id);
     setForm({
       product: recipe.product,
-      sizeId: recipe.sizeId,
+      sku: recipe.sku,
       sizeNameBengali: recipe.sizeNameBengali,
       sizeNameEnglish: recipe.sizeNameEnglish,
       woodKg: recipe.woodKg,
@@ -188,7 +188,7 @@ export default function Recipes() {
                 <div className="flex items-center justify-between border-b border-[#e8e8e8] pb-3 mb-3">
                   <h3 className="text-[1.15rem] font-bold text-[#e21e53]">{recipe.product}</h3>
                   <span className="rounded-full bg-[rgba(59,130,246,0.1)] text-[#3b82f6] text-[0.7rem] font-bold px-3 py-1">
-                    Size: {recipe.sizeId}
+                    SKU: {recipe.sku}
                   </span>
                 </div>
 
@@ -285,12 +285,12 @@ export default function Recipes() {
               </div>
               <div className="grid grid-cols-3 gap-3">
                 <div className="flex flex-col gap-[0.4rem]">
-                  <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Size ID</label>
+                  <label className="text-[0.8rem] font-bold text-[#1E1E1E]">SKU</label>
                   <input
                     type="text"
-                    value={form.sizeId}
-                    onChange={(e) => handleChange('sizeId', e.target.value)}
-                    placeholder="e.g. 3x4_wb"
+                    value={form.sku}
+                    onChange={(e) => handleChange('sku', e.target.value)}
+                    placeholder="e.g. WB-3X4"
                     required
                     disabled={submitting}
                     className={inputClass}

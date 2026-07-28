@@ -22,6 +22,7 @@ interface MaterialBatch {
   id: number;
   rawMaterialId: number;
   rawMaterialName: string;
+  rawMaterialUnit?: string;
   quantityPurchased: number;
   unitPrice: number;
   totalCost: number;
@@ -460,7 +461,12 @@ export default function Inventory() {
               <tbody>
                 {batches.map((b) => (
                   <tr key={b.id} className="border-b border-[#f1f1f1] last:border-0">
-                    <td className="py-3 pr-3 text-[0.875rem] font-bold text-[#1E1E1E]">{b.rawMaterialName}</td>
+                    <td className="py-3 pr-3 text-[0.875rem] font-bold text-[#1E1E1E]">
+                      {b.rawMaterialName}
+                      {b.rawMaterialUnit && (
+                        <span className="ml-1 font-medium text-[#545454]">({b.rawMaterialUnit})</span>
+                      )}
+                    </td>
                     <td className="py-3 pr-3 text-[0.875rem] font-medium text-[#545454] text-right">{b.quantityPurchased}</td>
                     <td className="py-3 pr-3 text-[0.875rem] font-medium text-[#545454] text-right">৳{b.unitPrice}</td>
                     <td className="py-3 pr-3 text-[0.875rem] font-bold text-[#1E1E1E] text-right">৳{b.totalCost}</td>

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
+import { getApiErrorMessage } from '../utils/apiError';
 
 const API_URL = import.meta.env.VITE_API_URL;
 
@@ -50,11 +51,7 @@ export default function RoleManagement() {
       setPermissions(permsRes.data);
       setSelectedRoleId((prev) => prev ?? rolesRes.data[0]?.id ?? null);
     } catch (err) {
-      setError(
-        axios.isAxiosError(err) && err.response
-          ? `Failed to load roles/permissions: ${err.response.status}`
-          : 'Could not reach the server. Check the console.'
-      );
+      setError(getApiErrorMessage(err, 'Could not reach the server. Check the console.'));
       console.error('Failed to load roles/permissions', err);
     } finally {
       setLoadingRoles(false);
@@ -74,11 +71,7 @@ export default function RoleManagement() {
       const res = await axios.get<RoleWithPermissions>(`${API_URL}/roles/${roleId}/permissions`);
       setCheckedKeys(new Set(res.data.permissions.map((p) => p.key)));
     } catch (err) {
-      setError(
-        axios.isAxiosError(err) && err.response
-          ? `Failed to load role permissions: ${err.response.status}`
-          : 'Could not reach the server. Check the console.'
-      );
+      setError(getApiErrorMessage(err, 'Could not reach the server. Check the console.'));
       console.error('Failed to load role permissions', err);
     } finally {
       setLoadingRolePerms(false);
@@ -116,11 +109,9 @@ export default function RoleManagement() {
       setSuccess(true);
     } catch (err) {
       setError(
-        axios.isAxiosError(err) && err.response
-          ? err.response.status === 403
-            ? 'You do not have permission to change roles.'
-            : `Failed to save: ${err.response.status}`
-          : 'Could not reach the server. Check the console.'
+        axios.isAxiosError(err) && err.response?.status === 403
+          ? 'You do not have permission to change roles.'
+          : getApiErrorMessage(err, 'Could not reach the server. Check the console.')
       );
       console.error('Failed to save role permissions', err);
     } finally {

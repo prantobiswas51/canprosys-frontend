@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import Modal from '../components/Modal';
+import { getApiErrorMessage } from '../utils/apiError';
 
 const API_URL = import.meta.env.VITE_API_URL;
 
@@ -12,6 +13,7 @@ interface Employee {
   phone?: string;
   status: EmployeeStatus;
   pin?: number;
+  balance: number;
 }
 
 interface EmployeeFormState {
@@ -54,11 +56,7 @@ export default function Employees() {
       const res = await axios.get<Employee[]>(`${API_URL}/employees`);
       setEmployees(res.data);
     } catch (err) {
-      setListError(
-        axios.isAxiosError(err) && err.response
-          ? `Failed to load employees: ${err.response.status}`
-          : 'Could not reach the server. Check the console.'
-      );
+      setListError(getApiErrorMessage(err, 'Could not reach the server. Check the console.'));
       console.error('Failed to load employees', err);
     } finally {
       setLoading(false);
@@ -118,11 +116,7 @@ export default function Employees() {
       setModalOpen(false);
       fetchEmployees();
     } catch (err) {
-      setFormError(
-        axios.isAxiosError(err) && err.response
-          ? `Failed to save: ${err.response.status}`
-          : 'Could not reach the server. Check the console.'
-      );
+      setFormError(getApiErrorMessage(err, 'Could not reach the server. Check the console.'));
       console.error('Failed to save employee', err);
     } finally {
       setSubmitting(false);
@@ -137,7 +131,7 @@ export default function Employees() {
       setEmployees((prev) => prev.filter((emp) => emp.id !== id));
     } catch (err) {
       console.error('Failed to delete employee', err);
-      window.alert('Failed to delete employee. Check the console.');
+      window.alert(getApiErrorMessage(err, 'Failed to delete employee. Check the console.'));
     } finally {
       setDeletingId(null);
     }
@@ -180,6 +174,7 @@ export default function Employees() {
                   <th className="py-2 pr-4 font-bold">Phone</th>
                   <th className="py-2 pr-4 font-bold">Pin</th>
                   <th className="py-2 pr-4 font-bold">Status</th>
+                  <th className="py-2 pr-4 font-bold text-right">Balance (৳)</th>
                   <th className="py-2 pr-4 font-bold text-right">Actions</th>
                 </tr>
               </thead>
@@ -204,6 +199,9 @@ export default function Employees() {
                         />
                         {employee.status === 'active' ? 'Active' : 'Inactive'}
                       </span>
+                    </td>
+                    <td className="py-3 pr-4 text-right font-bold text-[#1E1E1E]">
+                      ৳ {employee.balance.toFixed(2)}
                     </td>
                     <td className="py-3 pr-4 text-right whitespace-nowrap">
                       <button

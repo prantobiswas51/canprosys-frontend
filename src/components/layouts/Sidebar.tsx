@@ -55,6 +55,7 @@ const navGroups: NavGroup[] = [
     items: [
       { icon: 'fa-gauge-high', label: 'Dashboard', path: '/' },
       { icon: 'fa-list-check', label: 'Tasks', path: '/tasks' },
+      { icon: 'fa-sliders', label: 'Recipes', path: '/recipes' },
       { icon: 'fa-pen-to-square', label: 'Daily Entry', path: '/daily-entry' },
       { icon: 'fa-clock-rotate-left', label: 'Activity Logs', path: '/activity-logs' },
     ],
@@ -79,7 +80,7 @@ const navGroups: NavGroup[] = [
     label: 'Settings & Admin',
     items: [
       { icon: 'fa-list-check', label: 'Role Management', path: '/manage-roles', superAdminOnly: true },
-      { icon: 'fa-sliders', label: 'Recipes', path: '/recipes' },
+      
       { icon: 'fa-truck', label: 'Transport Management', path: '/transport' },
       { icon: 'fa-shield-halved', label: 'Approval Queue', path: '/approvals', badge: 3 },
       { icon: 'fa-gears', label: 'System Settings', path: '/settings' },

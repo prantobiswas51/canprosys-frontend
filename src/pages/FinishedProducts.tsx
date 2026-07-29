@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
+import { getApiErrorMessage } from '../utils/apiError';
 
 const API_URL = import.meta.env.VITE_API_URL;
 
@@ -26,11 +27,7 @@ export default function FinishedProducts() {
       const res = await axios.get<Product[]>(`${API_URL}/products`);
       setProducts(res.data);
     } catch (err) {
-      setListError(
-        axios.isAxiosError(err) && err.response
-          ? `Failed to load products: ${err.response.status}`
-          : 'Could not reach the server. Check the console.'
-      );
+      setListError(getApiErrorMessage(err, 'Could not reach the server. Check the console.'));
       console.error('Failed to load products', err);
     } finally {
       setLoading(false);

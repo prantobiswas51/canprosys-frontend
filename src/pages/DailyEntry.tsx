@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import MultiSelect from '../components/MultiSelect';
+import { getApiErrorMessage } from '../utils/apiError';
 
 const API_URL = import.meta.env.VITE_API_URL;
 
@@ -8,7 +9,8 @@ interface TaskOption {
   id: number;
   name: string;
   slug: string;
-  pricePerUnit: number;
+  pricePerUnit: number | null;
+  requiresProduct: boolean;
 }
 
 interface EmployeeOption {
@@ -19,7 +21,7 @@ interface EmployeeOption {
 interface RecipeOption {
   id: number;
   product: string;
-  sizeNameEnglish: string;
+  sku: string;
 }
 
 interface DailyEntryRecord {
@@ -30,10 +32,6 @@ interface DailyEntryRecord {
   productName?: string;
   createdAt: string;
 }
-
-// Raw material prep tasks -- no product has been chosen yet at this stage,
-// so the Product Name field doesn't apply to them.
-const PRODUCT_NOT_APPLICABLE_SLUGS = ['wood_slicing', 'corner_cutting'];
 
 const inputClass =
   'w-full bg-white border border-[#e8e8e8] text-[#1E1E1E] px-[0.85rem] py-[0.65rem] rounded-lg text-[0.875rem] font-medium transition-all duration-200 outline-none focus:border-[#e21e53] focus:shadow-[0_0_0_3px_rgba(16,185,129,0.15)] disabled:opacity-60 disabled:cursor-not-allowed';
@@ -74,11 +72,7 @@ export default function DailyEntry() {
       setEmployees(employeesRes.data);
       setRecipes(recipesRes.data);
     } catch (err) {
-      setOptionsError(
-        axios.isAxiosError(err) && err.response
-          ? `Failed to load tasks/employees: ${err.response.status}`
-          : 'Could not reach the server. Check the console.'
-      );
+      setOptionsError(getApiErrorMessage(err, 'Could not reach the server. Check the console.'));
       console.error('Failed to load tasks/employees', err);
     } finally {
       setLoadingOptions(false);
@@ -92,11 +86,7 @@ export default function DailyEntry() {
       const res = await axios.get<DailyEntryRecord[]>(`${API_URL}/daily-entries`);
       setEntries(res.data);
     } catch (err) {
-      setListError(
-        axios.isAxiosError(err) && err.response
-          ? `Failed to load daily entries: ${err.response.status}`
-          : 'Could not reach the server. Check the console.'
-      );
+      setListError(getApiErrorMessage(err, 'Could not reach the server. Check the console.'));
       console.error('Failed to load daily entries', err);
     } finally {
       setLoadingEntries(false);
@@ -109,7 +99,7 @@ export default function DailyEntry() {
   }, [loadOptions, loadEntries]);
 
   const selectedTask = tasks.find((t) => String(t.id) === taskId);
-  const isProductApplicable = !!selectedTask && !PRODUCT_NOT_APPLICABLE_SLUGS.includes(selectedTask.slug);
+  const isProductApplicable = !!selectedTask && selectedTask.requiresProduct;
 
   const handleTaskChange = (value: string) => {
     setTaskId(value);
@@ -146,11 +136,7 @@ export default function DailyEntry() {
       setRecipeId('');
       loadEntries();
     } catch (err) {
-      setFormError(
-        axios.isAxiosError(err) && err.response
-          ? `Failed to save entry: ${err.response.status}`
-          : 'Could not reach the server. Check the console.'
-      );
+      setFormError(getApiErrorMessage(err, 'Could not reach the server. Check the console.'));
       console.error('Failed to save daily entry', err);
     } finally {
       setSubmitting(false);
@@ -210,7 +196,7 @@ export default function DailyEntry() {
                 </option>
                 {recipes.map((recipe) => (
                   <option key={recipe.id} value={recipe.id}>
-                    {recipe.product} ({recipe.sizeNameEnglish})
+                    {recipe.product} ({recipe.sku})
                   </option>
                 ))}
               </select>

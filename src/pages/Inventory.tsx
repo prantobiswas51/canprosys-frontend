@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
+import { getApiErrorMessage } from '../utils/apiError';
 
 const API_URL = import.meta.env.VITE_API_URL;
 
@@ -87,11 +88,7 @@ export default function Inventory() {
       const res = await axios.get<RawMaterial[]>(`${API_URL}/raw-materials`);
       setRawMaterials(res.data);
     } catch (err) {
-      setMaterialsError(
-        axios.isAxiosError(err) && err.response
-          ? `Failed to load raw materials: ${err.response.status}`
-          : 'Could not reach the server. Check the console.'
-      );
+      setMaterialsError(getApiErrorMessage(err, 'Could not reach the server. Check the console.'));
       console.error('Failed to load raw materials', err);
     } finally {
       setLoadingMaterials(false);
@@ -105,11 +102,7 @@ export default function Inventory() {
       const res = await axios.get<MaterialBatch[]>(`${API_URL}/material-batches`);
       setBatches(res.data);
     } catch (err) {
-      setBatchesError(
-        axios.isAxiosError(err) && err.response
-          ? `Failed to load batches: ${err.response.status}`
-          : 'Could not reach the server. Check the console.'
-      );
+      setBatchesError(getApiErrorMessage(err, 'Could not reach the server. Check the console.'));
       console.error('Failed to load material batches', err);
     } finally {
       setLoadingBatches(false);
@@ -154,11 +147,7 @@ export default function Inventory() {
       setMaterialForm(emptyMaterialForm);
       fetchRawMaterials();
     } catch (err) {
-      setMaterialFormError(
-        axios.isAxiosError(err) && err.response
-          ? `Failed to save: ${err.response.status}`
-          : 'Could not reach the server. Check the console.'
-      );
+      setMaterialFormError(getApiErrorMessage(err, 'Could not reach the server. Check the console.'));
       console.error('Failed to save raw material', err);
     } finally {
       setMaterialSubmitting(false);
@@ -175,7 +164,7 @@ export default function Inventory() {
       fetchBatches();
     } catch (err) {
       console.error('Failed to delete raw material', err);
-      window.alert('Failed to delete raw material. Check the console.');
+      window.alert(getApiErrorMessage(err, 'Failed to delete raw material. Check the console.'));
     } finally {
       setDeletingMaterialId(null);
     }
@@ -210,11 +199,7 @@ export default function Inventory() {
       setBatchForm(emptyBatchForm);
       fetchBatches();
     } catch (err) {
-      setBatchFormError(
-        axios.isAxiosError(err) && err.response
-          ? `Failed to save: ${err.response.status}`
-          : 'Could not reach the server. Check the console.'
-      );
+      setBatchFormError(getApiErrorMessage(err, 'Could not reach the server. Check the console.'));
       console.error('Failed to save material batch', err);
     } finally {
       setBatchSubmitting(false);
@@ -229,7 +214,7 @@ export default function Inventory() {
       setBatches((prev) => prev.filter((b) => b.id !== id));
     } catch (err) {
       console.error('Failed to delete material batch', err);
-      window.alert('Failed to delete batch. Check the console.');
+      window.alert(getApiErrorMessage(err, 'Failed to delete batch. Check the console.'));
     } finally {
       setDeletingBatchId(null);
     }

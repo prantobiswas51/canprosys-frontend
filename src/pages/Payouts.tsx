@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
+import { getApiErrorMessage } from '../utils/apiError';
 
 const API_URL = import.meta.env.VITE_API_URL;
 
@@ -36,11 +37,7 @@ export default function Payouts() {
       });
       setRows(res.data);
     } catch (err) {
-      setError(
-        axios.isAxiosError(err) && err.response
-          ? `Failed to load payouts: ${err.response.status}`
-          : 'Could not reach the server. Check the console.'
-      );
+      setError(getApiErrorMessage(err, 'Could not reach the server. Check the console.'));
       console.error('Failed to load payout summary', err);
     } finally {
       setLoading(false);
@@ -55,20 +52,20 @@ export default function Payouts() {
     setGenerating(true);
     setGenerateMessage(null);
     try {
-      const res = await axios.post<{ entriesProcessed: number; created: number; skipped: number }>(
+      const res = await axios.post<{ entriesProcessed: number; created: number; skipped: number; noRate: number }>(
         `${API_URL}/payouts/generate`,
         { month: selectedMonth }
       );
+      const noRateNote =
+        res.data.noRate > 0
+          ? `, ${res.data.noRate} skipped (no rate set -- either the task has no flat rate, or the recipe used has no Artisan Wages entry for that task)`
+          : '';
       setGenerateMessage(
-        `Processed ${res.data.entriesProcessed} entries — ${res.data.created} payout(s) created, ${res.data.skipped} already existed.`
+        `Processed ${res.data.entriesProcessed} entries — ${res.data.created} payout(s) created, ${res.data.skipped} already existed${noRateNote}.`
       );
       fetchSummary(selectedMonth);
     } catch (err) {
-      setGenerateMessage(
-        axios.isAxiosError(err) && err.response
-          ? `Failed to generate: ${err.response.status}`
-          : 'Could not reach the server. Check the console.'
-      );
+      setGenerateMessage(getApiErrorMessage(err, 'Could not reach the server. Check the console.'));
       console.error('Failed to generate payouts', err);
     } finally {
       setGenerating(false);

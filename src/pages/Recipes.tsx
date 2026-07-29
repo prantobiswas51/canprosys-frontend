@@ -1,40 +1,68 @@
 import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import Modal from '../components/Modal';
+import { getApiErrorMessage } from '../utils/apiError';
 
 const API_URL = import.meta.env.VITE_API_URL;
+
+interface TaskOption {
+  id: number;
+  name: string;
+}
+
+interface RawMaterialOption {
+  id: number;
+  name: string;
+  unit: string;
+}
+
+interface RecipeTaskRate {
+  id: number;
+  taskId: number;
+  taskName: string;
+  rate: number;
+}
+
+interface RecipeMaterialUsage {
+  id: number;
+  rawMaterialId: number;
+  rawMaterialName: string;
+  rawMaterialUnit: string;
+  quantity: number;
+}
 
 interface Recipe {
   id: number;
   product: string;
   sku: string;
-  sizeNameBengali: string;
-  sizeNameEnglish: string;
-  woodKg: string;
-  boardSheet: string;
-  screwAndHinges: string;
-  polyBagType: string;
-  polyBagQuantity: string;
-  frameMakingRate: string;
-  boardFittingRate: string;
-  packagingRate: string;
+  taskRates: RecipeTaskRate[];
+  materialUsages: RecipeMaterialUsage[];
 }
 
-type RecipeFormState = Omit<Recipe, 'id'>;
+// Form-only row shapes -- ids/values stay as strings while being edited so
+// an empty input isn't forced to "0".
+interface TaskRateFormRow {
+  taskId: string;
+  rate: string;
+}
+
+interface MaterialUsageFormRow {
+  rawMaterialId: string;
+  quantity: string;
+}
+
+interface RecipeFormState {
+  product: string;
+  sku: string;
+  taskRates: TaskRateFormRow[];
+  materialUsages: MaterialUsageFormRow[];
+}
 
 const emptyForm: RecipeFormState = {
   product: '',
   sku: '',
-  sizeNameBengali: '',
-  sizeNameEnglish: '',
-  woodKg: '',
-  boardSheet: '',
-  screwAndHinges: '',
-  polyBagType: 'Pieces',
-  polyBagQuantity: '',
-  frameMakingRate: '',
-  boardFittingRate: '',
-  packagingRate: '',
+  taskRates: [],
+  materialUsages: [],
 };
 
 const inputClass =
@@ -47,6 +75,12 @@ export default function Recipes() {
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [loading, setLoading] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
+
+  const [tasks, setTasks] = useState<TaskOption[]>([]);
+  const [tasksError, setTasksError] = useState<string | null>(null);
+
+  const [rawMaterials, setRawMaterials] = useState<RawMaterialOption[]>([]);
+  const [rawMaterialsError, setRawMaterialsError] = useState<string | null>(null);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -63,20 +97,40 @@ export default function Recipes() {
       const res = await axios.get<Recipe[]>(`${API_URL}/recipes`);
       setRecipes(res.data);
     } catch (err) {
-      setListError(
-        axios.isAxiosError(err) && err.response
-          ? `Failed to load recipes: ${err.response.status}`
-          : 'Could not reach the server. Check the console.'
-      );
+      setListError(getApiErrorMessage(err, 'Could not reach the server. Check the console.'));
       console.error('Failed to load recipes', err);
     } finally {
       setLoading(false);
     }
   }, []);
 
+  const fetchTasks = useCallback(async () => {
+    setTasksError(null);
+    try {
+      const res = await axios.get<TaskOption[]>(`${API_URL}/tasks`);
+      setTasks(res.data);
+    } catch (err) {
+      setTasksError(getApiErrorMessage(err, 'Could not reach the server. Check the console.'));
+      console.error('Failed to load tasks', err);
+    }
+  }, []);
+
+  const fetchRawMaterials = useCallback(async () => {
+    setRawMaterialsError(null);
+    try {
+      const res = await axios.get<RawMaterialOption[]>(`${API_URL}/raw-materials`);
+      setRawMaterials(res.data);
+    } catch (err) {
+      setRawMaterialsError(getApiErrorMessage(err, 'Could not reach the server. Check the console.'));
+      console.error('Failed to load raw materials', err);
+    }
+  }, []);
+
   useEffect(() => {
     fetchRecipes();
-  }, [fetchRecipes]);
+    fetchTasks();
+    fetchRawMaterials();
+  }, [fetchRecipes, fetchTasks, fetchRawMaterials]);
 
   const openCreateModal = () => {
     setEditingId(null);
@@ -90,16 +144,14 @@ export default function Recipes() {
     setForm({
       product: recipe.product,
       sku: recipe.sku,
-      sizeNameBengali: recipe.sizeNameBengali,
-      sizeNameEnglish: recipe.sizeNameEnglish,
-      woodKg: recipe.woodKg,
-      boardSheet: recipe.boardSheet,
-      screwAndHinges: recipe.screwAndHinges,
-      polyBagType: recipe.polyBagType,
-      polyBagQuantity: recipe.polyBagQuantity,
-      frameMakingRate: recipe.frameMakingRate,
-      boardFittingRate: recipe.boardFittingRate,
-      packagingRate: recipe.packagingRate,
+      taskRates: recipe.taskRates.map((tr) => ({
+        taskId: String(tr.taskId),
+        rate: String(tr.rate),
+      })),
+      materialUsages: recipe.materialUsages.map((mu) => ({
+        rawMaterialId: String(mu.rawMaterialId),
+        quantity: String(mu.quantity),
+      })),
     });
     setFormError(null);
     setModalOpen(true);
@@ -110,29 +162,102 @@ export default function Recipes() {
     setModalOpen(false);
   };
 
-  const handleChange = (field: keyof RecipeFormState, value: string) => {
+  const handleChange = (field: keyof Pick<RecipeFormState, 'product' | 'sku'>, value: string) => {
     setForm((prev) => ({ ...prev, [field]: value }));
   };
 
+  const addTaskRateRow = () => {
+    setForm((prev) => ({ ...prev, taskRates: [...prev.taskRates, { taskId: '', rate: '' }] }));
+  };
+
+  const removeTaskRateRow = (index: number) => {
+    setForm((prev) => ({ ...prev, taskRates: prev.taskRates.filter((_, i) => i !== index) }));
+  };
+
+  const updateTaskRateRow = (index: number, field: keyof TaskRateFormRow, value: string) => {
+    setForm((prev) => ({
+      ...prev,
+      taskRates: prev.taskRates.map((row, i) => (i === index ? { ...row, [field]: value } : row)),
+    }));
+  };
+
+  // Tasks already picked in another row -- excluded from the options in a
+  // given row's dropdown so the same task can't be added twice.
+  const usedTaskIds = (excludeIndex: number) =>
+    new Set(
+      form.taskRates
+        .filter((_, i) => i !== excludeIndex)
+        .map((row) => row.taskId)
+        .filter(Boolean),
+    );
+
+  const addMaterialUsageRow = () => {
+    setForm((prev) => ({
+      ...prev,
+      materialUsages: [...prev.materialUsages, { rawMaterialId: '', quantity: '' }],
+    }));
+  };
+
+  const removeMaterialUsageRow = (index: number) => {
+    setForm((prev) => ({ ...prev, materialUsages: prev.materialUsages.filter((_, i) => i !== index) }));
+  };
+
+  const updateMaterialUsageRow = (index: number, field: keyof MaterialUsageFormRow, value: string) => {
+    setForm((prev) => ({
+      ...prev,
+      materialUsages: prev.materialUsages.map((row, i) => (i === index ? { ...row, [field]: value } : row)),
+    }));
+  };
+
+  // Raw materials already picked in another row -- excluded from the
+  // options in a given row's dropdown so the same material can't be added
+  // twice (e.g. the two separate "Poly" piece/yard catalog rows are still
+  // distinct materials and can both be picked, just not the same one twice).
+  const usedRawMaterialIds = (excludeIndex: number) =>
+    new Set(
+      form.materialUsages
+        .filter((_, i) => i !== excludeIndex)
+        .map((row) => row.rawMaterialId)
+        .filter(Boolean),
+    );
+
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    setSubmitting(true);
     setFormError(null);
 
+    if (form.taskRates.some((row) => !row.taskId || row.rate.trim() === '')) {
+      setFormError('Every Artisan Wages row needs a task and a rate -- remove any incomplete rows.');
+      return;
+    }
+
+    if (form.materialUsages.some((row) => !row.rawMaterialId || row.quantity.trim() === '')) {
+      setFormError('Every Materials (BOM) row needs a material and a quantity -- remove any incomplete rows.');
+      return;
+    }
+
+    const payload = {
+      ...form,
+      taskRates: form.taskRates.map((row) => ({
+        taskId: Number(row.taskId),
+        rate: Number(row.rate),
+      })),
+      materialUsages: form.materialUsages.map((row) => ({
+        rawMaterialId: Number(row.rawMaterialId),
+        quantity: Number(row.quantity),
+      })),
+    };
+
+    setSubmitting(true);
     try {
       if (editingId != null) {
-        await axios.patch(`${API_URL}/recipes/${editingId}`, form);
+        await axios.patch(`${API_URL}/recipes/${editingId}`, payload);
       } else {
-        await axios.post(`${API_URL}/recipes`, form);
+        await axios.post(`${API_URL}/recipes`, payload);
       }
       setModalOpen(false);
       fetchRecipes();
     } catch (err) {
-      setFormError(
-        axios.isAxiosError(err) && err.response
-          ? `Failed to save: ${err.response.status}`
-          : 'Could not reach the server. Check the console.'
-      );
+      setFormError(getApiErrorMessage(err, 'Could not reach the server. Check the console.'));
       console.error('Failed to save recipe', err);
     } finally {
       setSubmitting(false);
@@ -147,7 +272,7 @@ export default function Recipes() {
       setRecipes((prev) => prev.filter((r) => r.id !== id));
     } catch (err) {
       console.error('Failed to delete recipe', err);
-      window.alert('Failed to delete recipe. Check the console.');
+      window.alert(getApiErrorMessage(err, 'Failed to delete recipe. Check the console.'));
     } finally {
       setDeletingId(null);
     }
@@ -192,52 +317,47 @@ export default function Recipes() {
                   </span>
                 </div>
 
-                <p className="text-[0.8rem] font-semibold text-[#1E1E1E]">
-                  {recipe.sizeNameEnglish}
-                  <span className="ml-1 font-medium text-[#545454] opacity-80">({recipe.sizeNameBengali})</span>
-                </p>
-
                 <p className="text-[0.72rem] font-bold uppercase tracking-[0.05em] text-[#545454] mt-3 mb-2">
                   Material Consumption (BOM)
                 </p>
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="flex items-center gap-[0.35rem] rounded-lg border border-[#e8e8e8] bg-[#f8fafc] px-2 py-2 text-[0.8rem] font-semibold text-[#1E1E1E]">
-                    <i className="fa-solid fa-tree w-4 text-center text-[#545454]" />
-                    <span>Wood: {recipe.woodKg} kg</span>
+                {recipe.materialUsages.length === 0 ? (
+                  <p className="text-[0.8rem] font-medium text-[#545454]">No materials assigned yet.</p>
+                ) : (
+                  <div className="grid grid-cols-2 gap-2">
+                    {recipe.materialUsages.map((mu) => (
+                      <div
+                        key={mu.id}
+                        className="flex items-center gap-[0.35rem] rounded-lg border border-[#e8e8e8] bg-[#f8fafc] px-2 py-2 text-[0.8rem] font-semibold text-[#1E1E1E]"
+                      >
+                        <i className="fa-solid fa-cube w-4 text-center text-[#545454]" />
+                        <span>
+                          {mu.rawMaterialName}: {mu.quantity} {mu.rawMaterialUnit}
+                        </span>
+                      </div>
+                    ))}
                   </div>
-                  <div className="flex items-center gap-[0.35rem] rounded-lg border border-[#e8e8e8] bg-[#f8fafc] px-2 py-2 text-[0.8rem] font-semibold text-[#1E1E1E]">
-                    <i className="fa-solid fa-square w-4 text-center text-[#545454]" />
-                    <span>Board: {recipe.boardSheet}</span>
-                  </div>
-                  <div className="flex items-center gap-[0.35rem] rounded-lg border border-[#e8e8e8] bg-[#f8fafc] px-2 py-2 text-[0.8rem] font-semibold text-[#1E1E1E]">
-                    <i className="fa-solid fa-screwdriver w-4 text-center text-[#545454]" />
-                    <span>Screws: {recipe.screwAndHinges}</span>
-                  </div>
-                  <div className="flex items-center gap-[0.35rem] rounded-lg border border-[#e8e8e8] bg-[#f8fafc] px-2 py-2 text-[0.8rem] font-semibold text-[#1E1E1E]">
-                    <i className="fa-solid fa-box-open w-4 text-center text-[#545454]" />
-                    <span>
-                      Poly: {recipe.polyBagQuantity} {recipe.polyBagType}
-                    </span>
-                  </div>
-                </div>
+                )}
 
                 <p className="text-[0.72rem] font-bold uppercase tracking-[0.05em] text-[#545454] mt-4 mb-2">
                   Artisan Wages (Payout — ৳)
                 </p>
-                <div className="flex flex-col gap-[0.35rem]">
-                  <div className="flex justify-between border-b border-dashed border-[#e8e8e8] pb-1 text-[0.85rem]">
-                    <span className="text-[#545454]">Frame Making</span>
-                    <span className="font-bold text-[#1E1E1E]">৳ {recipe.frameMakingRate}</span>
+                {recipe.taskRates.length === 0 ? (
+                  <p className="text-[0.8rem] font-medium text-[#545454]">No tasks assigned yet.</p>
+                ) : (
+                  <div className="flex flex-col gap-[0.35rem]">
+                    {recipe.taskRates.map((tr, i) => (
+                      <div
+                        key={tr.id}
+                        className={`flex justify-between text-[0.85rem] ${
+                          i < recipe.taskRates.length - 1 ? 'border-b border-dashed border-[#e8e8e8] pb-1' : ''
+                        }`}
+                      >
+                        <span className="text-[#545454]">{tr.taskName}</span>
+                        <span className="font-bold text-[#1E1E1E]">৳ {tr.rate}</span>
+                      </div>
+                    ))}
                   </div>
-                  <div className="flex justify-between border-b border-dashed border-[#e8e8e8] pb-1 text-[0.85rem]">
-                    <span className="text-[#545454]">Board Fitting</span>
-                    <span className="font-bold text-[#1E1E1E]">৳ {recipe.boardFittingRate}</span>
-                  </div>
-                  <div className="flex justify-between text-[0.85rem]">
-                    <span className="text-[#545454]">Packaging</span>
-                    <span className="font-bold text-[#1E1E1E]">৳ {recipe.packagingRate}</span>
-                  </div>
-                </div>
+                )}
               </div>
 
               <div className="mt-4 flex gap-2 border-t border-[#e8e8e8] pt-3">
@@ -283,159 +403,167 @@ export default function Recipes() {
                   className={inputClass}
                 />
               </div>
-              <div className="grid grid-cols-3 gap-3">
-                <div className="flex flex-col gap-[0.4rem]">
-                  <label className="text-[0.8rem] font-bold text-[#1E1E1E]">SKU</label>
-                  <input
-                    type="text"
-                    value={form.sku}
-                    onChange={(e) => handleChange('sku', e.target.value)}
-                    placeholder="e.g. WB-3X4"
-                    required
-                    disabled={submitting}
-                    className={inputClass}
-                  />
-                </div>
-                <div className="flex flex-col gap-[0.4rem]">
-                  <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Size (English)</label>
-                  <input
-                    type="text"
-                    value={form.sizeNameEnglish}
-                    onChange={(e) => handleChange('sizeNameEnglish', e.target.value)}
-                    placeholder="e.g. 3x4 ft Whiteboard"
-                    required
-                    disabled={submitting}
-                    className={inputClass}
-                  />
-                </div>
-                <div className="flex flex-col gap-[0.4rem]">
-                  <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Size (Bengali)</label>
-                  <input
-                    type="text"
-                    value={form.sizeNameBengali}
-                    onChange={(e) => handleChange('sizeNameBengali', e.target.value)}
-                    placeholder="e.g. ৩ x ৪ ফুট হোয়াইটবোর্ড"
-                    required
-                    disabled={submitting}
-                    className={inputClass}
-                  />
-                </div>
+              <div className="flex flex-col gap-[0.4rem]">
+                <label className="text-[0.8rem] font-bold text-[#1E1E1E]">SKU</label>
+                <input
+                  type="text"
+                  value={form.sku}
+                  onChange={(e) => handleChange('sku', e.target.value)}
+                  placeholder="e.g. WB-3X4"
+                  required
+                  disabled={submitting}
+                  className={inputClass}
+                />
               </div>
             </div>
           </div>
 
           <div>
-            <h4 className="text-[0.72rem] font-extrabold uppercase tracking-[0.05em] text-[#545454] mb-2">
-              Materials (BOM)
-            </h4>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="flex flex-col gap-[0.4rem]">
-                <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Wood (kg)</label>
-                <input
-                  type="text"
-                  value={form.woodKg}
-                  onChange={(e) => handleChange('woodKg', e.target.value)}
-                  placeholder="e.g. 2.8"
-                  required
-                  disabled={submitting}
-                  className={inputClass}
-                />
-              </div>
-              <div className="flex flex-col gap-[0.4rem]">
-                <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Board Sheet</label>
-                <input
-                  type="text"
-                  value={form.boardSheet}
-                  onChange={(e) => handleChange('boardSheet', e.target.value)}
-                  placeholder="e.g. 1 piece"
-                  required
-                  disabled={submitting}
-                  className={inputClass}
-                />
-              </div>
-              <div className="flex flex-col gap-[0.4rem]">
-                <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Screws &amp; Hinges</label>
-                <input
-                  type="text"
-                  value={form.screwAndHinges}
-                  onChange={(e) => handleChange('screwAndHinges', e.target.value)}
-                  placeholder="e.g. 6 piece"
-                  required
-                  disabled={submitting}
-                  className={inputClass}
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="flex flex-col gap-[0.4rem]">
-                  <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Poly Bag Type</label>
-                  <select
-                    value={form.polyBagType}
-                    onChange={(e) => handleChange('polyBagType', e.target.value)}
-                    disabled={submitting}
-                    className={inputClass}
-                  >
-                    <option value="Pieces">Pieces</option>
-                    <option value="Yard">Yard</option>
-                  </select>
-                </div>
-                <div className="flex flex-col gap-[0.4rem]">
-                  <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Poly Bag Qty</label>
-                  <input
-                    type="text"
-                    value={form.polyBagQuantity}
-                    onChange={(e) => handleChange('polyBagQuantity', e.target.value)}
-                    placeholder="e.g. 4"
-                    required
-                    disabled={submitting}
-                    className={inputClass}
-                  />
-                </div>
-              </div>
+            <div className="flex items-center justify-between mb-2">
+              <h4 className="text-[0.72rem] font-extrabold uppercase tracking-[0.05em] text-[#545454]">
+                Materials (BOM)
+              </h4>
+              <button
+                type="button"
+                onClick={addMaterialUsageRow}
+                disabled={submitting || rawMaterials.length === 0}
+                className="h-7 px-2 flex items-center gap-1 rounded-lg border border-[#e8e8e8] text-[#545454] font-bold text-[0.72rem] hover:bg-[#f8fafc] hover:text-[#1E1E1E] transition-colors duration-200 disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
+              >
+                <i className="fa-solid fa-plus" />
+                Add Material
+              </button>
             </div>
+
+            {rawMaterialsError && <p className="text-[0.8rem] font-semibold text-[#ef4444] mb-2">{rawMaterialsError}</p>}
+
+            {form.materialUsages.length === 0 ? (
+              <p className="text-[0.8rem] font-medium text-[#545454]">
+                No materials assigned yet -- click "Add Material" to define this recipe's BOM.
+              </p>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {form.materialUsages.map((row, index) => {
+                  const excluded = usedRawMaterialIds(index);
+                  const selectedUnit = rawMaterials.find((m) => String(m.id) === row.rawMaterialId)?.unit;
+                  return (
+                    <div key={index} className="flex gap-2 items-center">
+                      <select
+                        value={row.rawMaterialId}
+                        onChange={(e) => updateMaterialUsageRow(index, 'rawMaterialId', e.target.value)}
+                        required
+                        disabled={submitting}
+                        className={`${inputClass.replace('w-full ', '')} flex-1 min-w-0`}
+                      >
+                        <option value="" disabled>
+                          Select material...
+                        </option>
+                        {rawMaterials
+                          .filter((m) => !excluded.has(String(m.id)) || String(m.id) === row.rawMaterialId)
+                          .map((m) => (
+                            <option key={m.id} value={m.id}>
+                              {m.name} ({m.unit})
+                            </option>
+                          ))}
+                      </select>
+                      <span className="w-14 shrink-0 text-center text-[0.72rem] font-bold uppercase tracking-[0.03em] text-[#545454]">
+                        {selectedUnit ?? '—'}
+                      </span>
+                      <input
+                        type="number"
+                        step="any"
+                        value={row.quantity}
+                        onChange={(e) => updateMaterialUsageRow(index, 'quantity', e.target.value)}
+                        placeholder="e.g. 2.8"
+                        required
+                        disabled={submitting}
+                        className={`${inputClass.replace('w-full ', '')} w-[90px] shrink-0`}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removeMaterialUsageRow(index)}
+                        disabled={submitting}
+                        className="h-9 w-9 shrink-0 flex items-center justify-center rounded-lg border border-[rgba(239,68,68,0.25)] text-[#ef4444] hover:bg-[rgba(239,68,68,0.08)] transition-colors duration-200 disabled:opacity-60 cursor-pointer"
+                        title="Remove"
+                      >
+                        <i className="fa-solid fa-trash" />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           <div>
-            <h4 className="text-[0.72rem] font-extrabold uppercase tracking-[0.05em] text-[#545454] mb-2">
-              Artisan Wages (Payout — ৳)
-            </h4>
-            <div className="grid grid-cols-3 gap-3">
-              <div className="flex flex-col gap-[0.4rem]">
-                <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Frame Making</label>
-                <input
-                  type="text"
-                  value={form.frameMakingRate}
-                  onChange={(e) => handleChange('frameMakingRate', e.target.value)}
-                  placeholder="e.g. 55"
-                  required
-                  disabled={submitting}
-                  className={inputClass}
-                />
-              </div>
-              <div className="flex flex-col gap-[0.4rem]">
-                <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Board Fitting</label>
-                <input
-                  type="text"
-                  value={form.boardFittingRate}
-                  onChange={(e) => handleChange('boardFittingRate', e.target.value)}
-                  placeholder="e.g. 55"
-                  required
-                  disabled={submitting}
-                  className={inputClass}
-                />
-              </div>
-              <div className="flex flex-col gap-[0.4rem]">
-                <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Packaging</label>
-                <input
-                  type="text"
-                  value={form.packagingRate}
-                  onChange={(e) => handleChange('packagingRate', e.target.value)}
-                  placeholder="e.g. 20"
-                  required
-                  disabled={submitting}
-                  className={inputClass}
-                />
-              </div>
+            <div className="flex items-center justify-between mb-2">
+              <h4 className="text-[0.72rem] font-extrabold uppercase tracking-[0.05em] text-[#545454]">
+                Artisan Wages (Payout — ৳)
+              </h4>
+              <button
+                type="button"
+                onClick={addTaskRateRow}
+                disabled={submitting || tasks.length === 0}
+                className="h-7 px-2 flex items-center gap-1 rounded-lg border border-[#e8e8e8] text-[#545454] font-bold text-[0.72rem] hover:bg-[#f8fafc] hover:text-[#1E1E1E] transition-colors duration-200 disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
+              >
+                <i className="fa-solid fa-plus" />
+                Add Task
+              </button>
             </div>
+
+            {tasksError && <p className="text-[0.8rem] font-semibold text-[#ef4444] mb-2">{tasksError}</p>}
+
+            {form.taskRates.length === 0 ? (
+              <p className="text-[0.8rem] font-medium text-[#545454]">
+                No tasks assigned yet -- click "Add Task" to pay artisans for a step on this recipe.
+              </p>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {form.taskRates.map((row, index) => {
+                  const excluded = usedTaskIds(index);
+                  return (
+                    <div key={index} className="flex gap-2 items-center">
+                      <select
+                        value={row.taskId}
+                        onChange={(e) => updateTaskRateRow(index, 'taskId', e.target.value)}
+                        required
+                        disabled={submitting}
+                        className={`${inputClass.replace('w-full ', '')} flex-1 min-w-0`}
+                      >
+                        <option value="" disabled>
+                          Select task...
+                        </option>
+                        {tasks
+                          .filter((t) => !excluded.has(String(t.id)) || String(t.id) === row.taskId)
+                          .map((t) => (
+                            <option key={t.id} value={t.id}>
+                              {t.name}
+                            </option>
+                          ))}
+                      </select>
+                      <input
+                        type="number"
+                        step="any"
+                        value={row.rate}
+                        onChange={(e) => updateTaskRateRow(index, 'rate', e.target.value)}
+                        placeholder="e.g. 55"
+                        required
+                        disabled={submitting}
+                        className={`${inputClass.replace('w-full ', '')} w-[110px] shrink-0`}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removeTaskRateRow(index)}
+                        disabled={submitting}
+                        className="h-9 w-9 shrink-0 flex items-center justify-center rounded-lg border border-[rgba(239,68,68,0.25)] text-[#ef4444] hover:bg-[rgba(239,68,68,0.08)] transition-colors duration-200 disabled:opacity-60 cursor-pointer"
+                        title="Remove"
+                      >
+                        <i className="fa-solid fa-trash" />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           {formError && <p className="text-[0.8rem] font-semibold text-[#ef4444]">{formError}</p>}

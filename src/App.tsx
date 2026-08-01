@@ -16,6 +16,7 @@ import Employees from './pages/Employees'
 import RoleManagement from './pages/RoleManagement'
 import Recipes from './pages/Recipes'
 import TransportManagement from './pages/TransportManagement'
+import ShipmentBasic from './pages/ShipmentBasic'
 import ApprovalQueue from './pages/ApprovalQueue'
 import SystemSettings from './pages/SystemSettings'
 import UserManual from './pages/UserManual'
@@ -41,6 +42,7 @@ function App() {
         <Route path="/manage-roles" element={<RoleManagement />} />
         <Route path="/recipes" element={<Recipes />} />
         <Route path="/transport" element={<TransportManagement />} />
+        <Route path="/shipment-basic" element={<ShipmentBasic />} />
         <Route path="/approvals" element={<ApprovalQueue />} />
         <Route path="/settings" element={<SystemSettings />} />
         <Route path="/user-manual" element={<UserManual />} />

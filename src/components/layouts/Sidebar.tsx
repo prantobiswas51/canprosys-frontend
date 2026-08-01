@@ -82,6 +82,7 @@ const navGroups: NavGroup[] = [
       { icon: 'fa-list-check', label: 'Role Management', path: '/manage-roles', superAdminOnly: true },
       
       { icon: 'fa-truck', label: 'Transport Management', path: '/transport' },
+      { icon: 'fa-truck-fast', label: 'Shipment Basic', path: '/shipment-basic' },
       { icon: 'fa-shield-halved', label: 'Approval Queue', path: '/approvals', badge: 3 },
       { icon: 'fa-gears', label: 'System Settings', path: '/settings' },
       { icon: 'fa-book-open', label: 'User Manual', path: '/user-manual' },

@@ -13,9 +13,8 @@ const navBtnActive =
 function NavIcon({ icon, active }: { icon: string; active?: boolean }) {
   return (
     <span
-      className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition-all duration-200 ${
-        active ? 'bg-white/15 text-white' : 'bg-[rgba(226,30,83,0.08)] text-[#e21e53]'
-      }`}
+      className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition-all duration-200 ${active ? 'bg-white/15 text-white' : 'bg-[rgba(226,30,83,0.08)] text-[#e21e53]'
+        }`}
     >
       <i className={`fa-solid ${icon} text-[1.1rem]`} />
     </span>
@@ -72,6 +71,7 @@ const navGroups: NavGroup[] = [
     label: 'Team',
     items: [
       { icon: 'fa-wallet', label: 'Payouts', path: '/payouts' },
+      { icon: 'fa-hand-holding-dollar', label: 'Loans', path: '/loans' },
       { icon: 'fa-users-gear', label: 'Employee Dashboard', path: '/employee-dashboard' },
       { icon: 'fa-user-group', label: 'Employees', path: '/employees' },
     ],
@@ -80,9 +80,9 @@ const navGroups: NavGroup[] = [
     label: 'Settings & Admin',
     items: [
       { icon: 'fa-list-check', label: 'Role Management', path: '/manage-roles', superAdminOnly: true },
-      
-      { icon: 'fa-truck', label: 'Transport Management', path: '/transport' },
       { icon: 'fa-truck-fast', label: 'Shipment Basic', path: '/shipment-basic' },
+
+      { icon: 'fa-truck', label: 'Transport Management', path: '/transport' },
       { icon: 'fa-shield-halved', label: 'Approval Queue', path: '/approvals', badge: 3 },
       { icon: 'fa-gears', label: 'System Settings', path: '/settings' },
       { icon: 'fa-book-open', label: 'User Manual', path: '/user-manual' },
@@ -101,30 +101,30 @@ export default function Sidebar() {
         if (visibleItems.length === 0) return null;
 
         return (
-        <div key={group.label} className="flex flex-col gap-[0.15rem] mb-[0.4rem]">
-          <span className="block px-[0.85rem] pb-[0.15rem] pt-[0.4rem] text-[0.6rem] font-extrabold uppercase tracking-[0.1em] text-[#545454] opacity-60">
-            {group.label}
-          </span>
-          {visibleItems.map((item) => (
-            <NavLink
-              key={item.label}
-              to={item.path}
-              end={item.path === '/'}
-              className={({ isActive }: { isActive: boolean }) =>
-                `${navBtnBase} ${isActive ? navBtnActive : navBtnInactive}`
-              }
-            >
-              {({ isActive }: { isActive: boolean }) => (
-                <>
-                  <NavIcon icon={item.icon} active={isActive} />
-                  <span>{item.label}</span>
-                  {item.badge != null && <BadgeCount count={item.badge} />}
-                  {isActive && <ActivePip />}
-                </>
-              )}
-            </NavLink>
-          ))}
-        </div>
+          <div key={group.label} className="flex flex-col gap-[0.15rem] mb-[0.4rem]">
+            <span className="block px-[0.85rem] pb-[0.15rem] pt-[0.4rem] text-[0.6rem] font-extrabold uppercase tracking-[0.1em] text-[#545454] opacity-60">
+              {group.label}
+            </span>
+            {visibleItems.map((item) => (
+              <NavLink
+                key={item.label}
+                to={item.path}
+                end={item.path === '/'}
+                className={({ isActive }: { isActive: boolean }) =>
+                  `${navBtnBase} ${isActive ? navBtnActive : navBtnInactive}`
+                }
+              >
+                {({ isActive }: { isActive: boolean }) => (
+                  <>
+                    <NavIcon icon={item.icon} active={isActive} />
+                    <span>{item.label}</span>
+                    {item.badge != null && <BadgeCount count={item.badge} />}
+                    {isActive && <ActivePip />}
+                  </>
+                )}
+              </NavLink>
+            ))}
+          </div>
         );
       })}
 

@@ -11,6 +11,7 @@ import Inventory from './pages/Inventory'
 import FinishedProducts from './pages/FinishedProducts'
 import WasteManagement from './pages/WasteManagement'
 import Payouts from './pages/Payouts'
+import Loans from './pages/Loans'
 import EmployeeDashboard from './pages/EmployeeDashboard'
 import Employees from './pages/Employees'
 import RoleManagement from './pages/RoleManagement'
@@ -37,6 +38,7 @@ function App() {
         <Route path="/finished-products" element={<FinishedProducts />} />
         <Route path="/waste-management" element={<WasteManagement />} />
         <Route path="/payouts" element={<Payouts />} />
+        <Route path="/loans" element={<Loans />} />
         <Route path="/employee-dashboard" element={<EmployeeDashboard />} />
         <Route path="/employees" element={<Employees />} />
         <Route path="/manage-roles" element={<RoleManagement />} />

@@ -16,6 +16,7 @@ interface TaskOption {
 interface EmployeeOption {
   id: number;
   name: string;
+  status: 'active' | 'inactive';
 }
 
 interface RecipeOption {
@@ -97,6 +98,11 @@ export default function DailyEntry() {
     loadOptions();
     loadEntries();
   }, [loadOptions, loadEntries]);
+
+  // Inactive employees can't be assigned new work -- filtered out of the
+  // picker here as well as rejected server-side, so there's no dead-end
+  // where someone picks an inactive artisan and only finds out on submit.
+  const activeEmployees = employees.filter((e) => e.status === 'active');
 
   const selectedTask = tasks.find((t) => String(t.id) === taskId);
   const isProductApplicable = !!selectedTask && selectedTask.requiresProduct;
@@ -206,7 +212,7 @@ export default function DailyEntry() {
           <div className="flex flex-col gap-[0.4rem] flex-1 min-w-[180px]">
             <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Select Artisan</label>
             <MultiSelect
-              options={employees.map((employee) => ({ id: employee.id, label: employee.name }))}
+              options={activeEmployees.map((employee) => ({ id: employee.id, label: employee.name }))}
               selectedIds={employeeIds}
               onChange={setEmployeeIds}
               placeholder="Select artisan(s)..."

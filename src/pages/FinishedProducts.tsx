@@ -407,33 +407,37 @@ export default function FinishedProducts() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="block text-[0.72rem] font-extrabold uppercase tracking-[0.05em] text-[#545454] mb-1">
-                Note (optional)
-              </label>
-              <input
-                type="text"
-                value={shipmentForm.note}
-                onChange={(e) => handleShipmentChange('note', e.target.value)}
-                className={inputClass}
-                placeholder="Any notes for this shipment"
-              />
-            </div>
-            <div>
-              <label className="block text-[0.72rem] font-extrabold uppercase tracking-[0.05em] text-[#545454] mb-1">
-                Toll Cost (৳, optional)
-              </label>
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                value={shipmentForm.totalCost}
-                onChange={(e) => handleShipmentChange('totalCost', e.target.value)}
-                className={inputClass}
-                placeholder="0.00"
-              />
-            </div>
+          <div>
+            <label className="block text-[0.72rem] font-extrabold uppercase tracking-[0.05em] text-[#545454] mb-1">
+              Toll Cost (৳, optional)
+            </label>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={shipmentForm.totalCost}
+              onChange={(e) => handleShipmentChange('totalCost', e.target.value)}
+              className={inputClass}
+              placeholder="0.00"
+            />
+          </div>
+
+          <p className="text-[0.75rem] text-[#545454] -mt-1">
+            <i className="fa-solid fa-circle-info mr-1 text-[#e21e53]" />
+            An invoice number is generated automatically once you create this shipment.
+          </p>
+
+          <div>
+            <label className="block text-[0.72rem] font-extrabold uppercase tracking-[0.05em] text-[#545454] mb-1">
+              Note (optional)
+            </label>
+            <input
+              type="text"
+              value={shipmentForm.note}
+              onChange={(e) => handleShipmentChange('note', e.target.value)}
+              className={inputClass}
+              placeholder="Any notes for this shipment"
+            />
           </div>
 
           <div>

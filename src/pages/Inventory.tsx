@@ -183,8 +183,15 @@ export default function Inventory() {
     const quantityPurchased = parseFloat(batchForm.quantityPurchased);
     const unitPrice = parseFloat(batchForm.unitPrice);
 
-    if (!batchForm.rawMaterialId || isNaN(quantityPurchased) || quantityPurchased <= 0 || isNaN(unitPrice) || unitPrice < 0) {
-      setBatchFormError('Pick a material and enter a valid quantity and unit price.');
+    if (
+      !batchForm.rawMaterialId ||
+      isNaN(quantityPurchased) ||
+      quantityPurchased <= 0 ||
+      isNaN(unitPrice) ||
+      unitPrice < 0 ||
+      !batchForm.purchaseDate
+    ) {
+      setBatchFormError('Pick a material and enter a valid quantity, unit price, and purchase date.');
       setBatchSubmitting(false);
       return;
     }
@@ -194,7 +201,7 @@ export default function Inventory() {
         rawMaterialId: Number(batchForm.rawMaterialId),
         quantityPurchased,
         unitPrice,
-        purchaseDate: batchForm.purchaseDate || undefined,
+        purchaseDate: batchForm.purchaseDate,
       });
       setBatchForm(emptyBatchForm);
       fetchBatches();
@@ -398,6 +405,7 @@ export default function Inventory() {
               type="date"
               value={batchForm.purchaseDate}
               onChange={(e) => handleBatchChange('purchaseDate', e.target.value)}
+              required
               disabled={batchSubmitting}
               className={inputClass}
             />

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { getApiErrorMessage } from '../utils/apiError';
+import { formatQty } from '../utils/formatNumber';
 
 const API_URL = import.meta.env.VITE_API_URL;
 
@@ -460,9 +461,9 @@ export default function Inventory() {
                         <span className="ml-1 font-medium text-[#545454]">({b.rawMaterialUnit})</span>
                       )}
                     </td>
-                    <td className="py-3 pr-3 text-[0.875rem] font-medium text-[#545454] text-right">{b.quantityPurchased}</td>
-                    <td className="py-3 pr-3 text-[0.875rem] font-medium text-[#545454] text-right">৳{b.unitPrice}</td>
-                    <td className="py-3 pr-3 text-[0.875rem] font-bold text-[#1E1E1E] text-right">৳{b.totalCost}</td>
+                    <td className="py-3 pr-3 text-[0.875rem] font-medium text-[#545454] text-right">{formatQty(b.quantityPurchased)}</td>
+                    <td className="py-3 pr-3 text-[0.875rem] font-medium text-[#545454] text-right">৳{b.unitPrice.toFixed(2)}</td>
+                    <td className="py-3 pr-3 text-[0.875rem] font-bold text-[#1E1E1E] text-right">৳{b.totalCost.toFixed(2)}</td>
                     <td className="py-3 pr-3 text-[0.875rem] font-semibold text-right">
                       <span
                         className={
@@ -473,7 +474,7 @@ export default function Inventory() {
                               : 'text-[#10b981]'
                         }
                       >
-                        {b.quantityRemaining}
+                        {formatQty(b.quantityRemaining)}
                       </span>
                     </td>
                     <td className="py-3 pr-3 text-[0.8rem] font-medium text-[#545454]">{b.purchaseDate || '—'}</td>

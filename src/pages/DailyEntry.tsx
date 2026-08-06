@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import MultiSelect from '../components/MultiSelect';
 import { getApiErrorMessage } from '../utils/apiError';
+import { formatQty } from '../utils/formatNumber';
 
 const API_URL = import.meta.env.VITE_API_URL;
 
@@ -285,7 +286,7 @@ export default function DailyEntry() {
                     <td className="py-3 pr-4 text-[#545454]">
                       {entry.employees?.map((emp) => emp.name).join(', ') || '—'}
                     </td>
-                    <td className="py-3 pr-4 text-[#545454] text-center">{entry.weightKg}</td>
+                    <td className="py-3 pr-4 text-[#545454] text-center">{formatQty(entry.weightKg)}</td>
                     <td className="py-3 pr-4 text-[#545454]">
                       {new Date(entry.createdAt).toLocaleString('en-US', {
                         timeZone: 'Asia/Dhaka',

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { getApiErrorMessage } from '../utils/apiError';
+import { formatQty } from '../utils/formatNumber';
 import Modal from '../components/Modal';
 
 const API_URL = import.meta.env.VITE_API_URL;
@@ -324,9 +325,9 @@ export default function FinishedProducts() {
                         </div>
                       </td>
                       <td className="py-3 pr-3 text-[0.8rem] font-medium text-[#545454]">{p.sku}</td>
-                      <td className="py-3 pr-3 text-[0.875rem] font-medium text-[#545454] text-right">৳{p.costPrice}</td>
+                      <td className="py-3 pr-3 text-[0.875rem] font-medium text-[#545454] text-right">৳{p.costPrice.toFixed(2)}</td>
                       <td className={`py-3 pr-3 text-[0.9rem] font-extrabold text-right ${inStock ? 'text-[#1E1E1E]' : 'text-[#ef4444]'}`}>
-                        {p.stock}
+                        {formatQty(p.stock)}
                       </td>
                       <td className="py-3 pr-3 text-[0.875rem] font-bold text-[#10b981] text-right">
                         ৳{((p.stock || 0) * (p.costPrice || 0)).toFixed(2)}
@@ -475,7 +476,7 @@ export default function FinishedProducts() {
                         .filter((p) => !excluded.has(String(p.id)) || String(p.id) === row.productId)
                         .map((p) => (
                           <option key={p.id} value={p.id}>
-                            {p.name} ({p.sku}) — {p.stock} in stock
+                            {p.name} ({p.sku}) — {formatQty(p.stock)} in stock
                           </option>
                         ))}
                     </select>

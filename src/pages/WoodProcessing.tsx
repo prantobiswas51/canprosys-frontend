@@ -42,6 +42,7 @@ interface WoodProcessingEntry {
   stage: WoodStage;
   stageName: string;
   employees: EmployeeOption[];
+  consumedQuantity: number;
   outputQuantity: number;
   wasteQuantity: number;
   wageRateUsed: number;
@@ -67,7 +68,7 @@ interface RawMaterialOption {
 interface EntryFormState {
   stageId: string;
   employeeIds: number[];
-  outputQuantity: string;
+  consumedQuantity: string;
   wasteQuantity: string;
   wasteTypeId: string;
   entryDate: string;
@@ -102,7 +103,7 @@ function today() {
 const emptyEntryForm: EntryFormState = {
   stageId: '',
   employeeIds: [],
-  outputQuantity: '',
+  consumedQuantity: '',
   wasteQuantity: '',
   wasteTypeId: '',
   entryDate: today(),
@@ -203,7 +204,9 @@ export default function WoodProcessing() {
 
   const activeEmployees = employees.filter((e) => e.status === 'active');
   const selectedStage = stages.find((s) => String(s.id) === entryForm.stageId);
+  const consumedQuantityNum = Number(entryForm.consumedQuantity) || 0;
   const wasteQuantityNum = Number(entryForm.wasteQuantity) || 0;
+  const derivedOutputQuantity = consumedQuantityNum - wasteQuantityNum;
   const needsWasteType =
     wasteQuantityNum > 0 && !selectedStage?.defaultWasteTypeId && !entryForm.wasteTypeId;
 
@@ -223,9 +226,12 @@ export default function WoodProcessing() {
       setEntryFormError('Select at least one artisan.');
       return;
     }
-    const outputQuantity = Number(entryForm.outputQuantity);
-    if (!outputQuantity || outputQuantity <= 0) {
-      setEntryFormError('Enter the output quantity (weight after processing).');
+    if (!consumedQuantityNum || consumedQuantityNum <= 0) {
+      setEntryFormError('Enter how much was taken from stock (weight before processing).');
+      return;
+    }
+    if (wasteQuantityNum >= consumedQuantityNum) {
+      setEntryFormError('Waste must be less than the quantity taken -- there has to be some good output.');
       return;
     }
     if (needsWasteType) {
@@ -238,7 +244,7 @@ export default function WoodProcessing() {
       await axios.post(`${API_URL}/wood-processing-entries`, {
         stageId: Number(entryForm.stageId),
         employeeIds: entryForm.employeeIds,
-        outputQuantity,
+        consumedQuantity: consumedQuantityNum,
         wasteQuantity: wasteQuantityNum,
         wasteTypeId: entryForm.wasteTypeId ? Number(entryForm.wasteTypeId) : undefined,
         entryDate: entryForm.entryDate,
@@ -380,8 +386,9 @@ export default function WoodProcessing() {
       <div>
         <h2 className="text-[1.4rem] font-extrabold text-[#1E1E1E] mb-2">Wood Processing</h2>
         <p className="text-[0.9rem] text-[#545454]">
-          Raw wood through slicing and cutting -- decoupled from Tasks/Daily Entry. Each stage's output cost
-          compounds: (consumed x source price) + wages, split across the good output only.
+          Raw wood through slicing and cutting -- decoupled from Tasks/Daily Entry. Wages are paid on the weight
+          taken before processing (output + waste combined). Cost compounds: (consumed x source price) + wages,
+          then split across the good output only to get its new unit price.
         </p>
       </div>
 
@@ -520,13 +527,13 @@ export default function WoodProcessing() {
             />
           </div>
 
-          <div className="flex flex-col gap-[0.4rem] w-full sm:w-[170px]">
-            <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Output Qty (after processing)</label>
+          <div className="flex flex-col gap-[0.4rem] w-full sm:w-[190px]">
+            <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Quantity Taken (before processing)</label>
             <input
               type="number"
               step="any"
-              value={entryForm.outputQuantity}
-              onChange={(e) => handleEntryChange('outputQuantity', e.target.value)}
+              value={entryForm.consumedQuantity}
+              onChange={(e) => handleEntryChange('consumedQuantity', e.target.value)}
               placeholder="e.g. 10"
               required
               disabled={entrySubmitting}
@@ -545,6 +552,13 @@ export default function WoodProcessing() {
               disabled={entrySubmitting}
               className={inputClass}
             />
+          </div>
+
+          <div className="flex flex-col gap-[0.4rem] w-full sm:w-[150px]">
+            <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Output (auto)</label>
+            <div className={`${inputClass} bg-[#f8fafc] text-[#545454] flex items-center`}>
+              {consumedQuantityNum > 0 ? formatQty(Math.max(derivedOutputQuantity, 0)) : '—'}
+            </div>
           </div>
 
           {wasteQuantityNum > 0 && (
@@ -686,7 +700,7 @@ export default function WoodProcessing() {
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="flex flex-col gap-[0.4rem]">
-                <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Wage Rate (৳/output unit)</label>
+                <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Wage Rate (৳/unit taken)</label>
                 <input
                   type="number"
                   step="0.01"
@@ -765,7 +779,7 @@ export default function WoodProcessing() {
                 <th className="py-2 pr-4 font-bold">Stage</th>
                 <th className="py-2 pr-4 font-bold">Input → Output</th>
                 <th className="py-2 pr-4 font-bold">Mirrors To Raw Material</th>
-                <th className="py-2 pr-4 font-bold text-right">Wage Rate (৳/output unit)</th>
+                <th className="py-2 pr-4 font-bold text-right">Wage Rate (৳/unit taken)</th>
                 <th className="py-2 pr-4 font-bold text-right">Action</th>
               </tr>
             </thead>
@@ -828,6 +842,7 @@ export default function WoodProcessing() {
                 <tr className="border-b border-[#e8e8e8] text-[0.72rem] uppercase tracking-[0.05em] text-[#545454]">
                   <th className="py-2 pr-4 font-bold">Stage</th>
                   <th className="py-2 pr-4 font-bold">Artisan(s)</th>
+                  <th className="py-2 pr-4 font-bold text-right">Taken</th>
                   <th className="py-2 pr-4 font-bold text-right">Output</th>
                   <th className="py-2 pr-4 font-bold text-right">Waste</th>
                   <th className="py-2 pr-4 font-bold text-right">Rate Used</th>
@@ -841,6 +856,7 @@ export default function WoodProcessing() {
                     <td className="py-3 pr-4 text-[#545454]">
                       {entry.employees?.map((e) => e.name).join(', ') || '—'}
                     </td>
+                    <td className="py-3 pr-4 text-[#545454] text-right">{formatQty(entry.consumedQuantity)}</td>
                     <td className="py-3 pr-4 text-[#545454] text-right">{formatQty(entry.outputQuantity)}</td>
                     <td className="py-3 pr-4 text-[#545454] text-right">{formatQty(entry.wasteQuantity)}</td>
                     <td className="py-3 pr-4 text-[#545454] text-right">৳{entry.wageRateUsed.toFixed(2)}</td>

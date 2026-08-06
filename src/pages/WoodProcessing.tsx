@@ -28,6 +28,7 @@ interface WoodStage {
   sequence: number;
   mirrorToRawMaterialId?: number;
   defaultWasteTypeId?: number;
+  defaultWasteType?: WasteType;
   active: boolean;
 }
 

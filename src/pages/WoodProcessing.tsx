@@ -66,6 +66,20 @@ interface RawMaterialOption {
   unit: string;
 }
 
+interface WoodStockBatchRow {
+  id: number;
+  woodTypeId: number;
+  woodTypeName: string;
+  quantity: number;
+  quantityRemaining: number;
+  unitPrice: number;
+  totalCost: number;
+  sourceEntryId?: number;
+  batchDate?: string;
+  note?: string;
+  createdAt: string;
+}
+
 interface EntryFormState {
   stageId: string;
   employeeIds: number[];
@@ -140,6 +154,7 @@ const primaryBtnClass =
 
 export default function WoodProcessing() {
   const [stock, setStock] = useState<WoodStockSummaryRow[]>([]);
+  const [batches, setBatches] = useState<WoodStockBatchRow[]>([]);
   const [stages, setStages] = useState<WoodStage[]>([]);
   const [woodTypes, setWoodTypes] = useState<WoodType[]>([]);
   const [wasteTypes, setWasteTypes] = useState<WasteType[]>([]);
@@ -157,9 +172,6 @@ export default function WoodProcessing() {
   const [purchaseSubmitting, setPurchaseSubmitting] = useState(false);
   const [purchaseFormError, setPurchaseFormError] = useState<string | null>(null);
 
-  const [rateEdits, setRateEdits] = useState<Record<number, string>>({});
-  const [savingRateId, setSavingRateId] = useState<number | null>(null);
-
   const [rawMaterials, setRawMaterials] = useState<RawMaterialOption[]>([]);
 
   const [woodTypeForm, setWoodTypeForm] = useState<WoodTypeFormState>(emptyWoodTypeForm);
@@ -167,16 +179,19 @@ export default function WoodProcessing() {
   const [woodTypeFormError, setWoodTypeFormError] = useState<string | null>(null);
 
   const [stageForm, setStageForm] = useState<StageFormState>(emptyStageForm);
+  const [editingStageId, setEditingStageId] = useState<number | null>(null);
   const [stageSubmitting, setStageSubmitting] = useState(false);
   const [stageFormError, setStageFormError] = useState<string | null>(null);
+  const [deletingStageId, setDeletingStageId] = useState<number | null>(null);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
     try {
-      const [stockRes, stagesRes, woodTypesRes, wasteTypesRes, employeesRes, entriesRes, rawMaterialsRes] =
+      const [stockRes, batchesRes, stagesRes, woodTypesRes, wasteTypesRes, employeesRes, entriesRes, rawMaterialsRes] =
         await Promise.all([
           axios.get<WoodStockSummaryRow[]>(`${API_URL}/wood-stock/summary`),
+          axios.get<WoodStockBatchRow[]>(`${API_URL}/wood-stock/batches`),
           axios.get<WoodStage[]>(`${API_URL}/wood-stages`),
           axios.get<WoodType[]>(`${API_URL}/wood-types`),
           axios.get<WasteType[]>(`${API_URL}/waste-types`),
@@ -185,6 +200,7 @@ export default function WoodProcessing() {
           axios.get<RawMaterialOption[]>(`${API_URL}/raw-materials`),
         ]);
       setStock(stockRes.data);
+      setBatches(batchesRes.data);
       setStages(stagesRes.data);
       setWoodTypes(woodTypesRes.data);
       setWasteTypes(wasteTypesRes.data);
@@ -293,31 +309,6 @@ export default function WoodProcessing() {
     }
   };
 
-  const handleRateSave = async (stage: WoodStage) => {
-    const raw = rateEdits[stage.id];
-    if (raw == null) return;
-    const wageRatePerUnit = Number(raw);
-    if (isNaN(wageRatePerUnit) || wageRatePerUnit < 0) {
-      window.alert('Enter a valid, non-negative wage rate.');
-      return;
-    }
-    setSavingRateId(stage.id);
-    try {
-      await axios.patch(`${API_URL}/wood-stages/${stage.id}`, { wageRatePerUnit });
-      setRateEdits((prev) => {
-        const next = { ...prev };
-        delete next[stage.id];
-        return next;
-      });
-      loadAll();
-    } catch (err) {
-      window.alert(getApiErrorMessage(err, 'Failed to update wage rate. Check the console.'));
-      console.error('Failed to update wage rate', err);
-    } finally {
-      setSavingRateId(null);
-    }
-  };
-
   const handleWoodTypeSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setWoodTypeFormError(null);
@@ -361,24 +352,76 @@ export default function WoodProcessing() {
 
     setStageSubmitting(true);
     try {
-      await axios.post(`${API_URL}/wood-stages`, {
+      const payload = {
         name: stageForm.name.trim(),
         inputTypeId: Number(stageForm.inputTypeId),
         outputTypeId: Number(stageForm.outputTypeId),
         wageRatePerUnit,
         sequence: stageForm.sequence ? Number(stageForm.sequence) : undefined,
+        // When editing, an emptied select means "clear it" -- send an
+        // explicit null so the backend actually unsets it, not undefined
+        // (which axios drops from the request body entirely and the
+        // backend reads as "leave this field alone").
         mirrorToRawMaterialId: stageForm.mirrorToRawMaterialId
           ? Number(stageForm.mirrorToRawMaterialId)
-          : undefined,
-        defaultWasteTypeId: stageForm.defaultWasteTypeId ? Number(stageForm.defaultWasteTypeId) : undefined,
-      });
+          : editingStageId != null
+            ? null
+            : undefined,
+        defaultWasteTypeId: stageForm.defaultWasteTypeId
+          ? Number(stageForm.defaultWasteTypeId)
+          : editingStageId != null
+            ? null
+            : undefined,
+      };
+
+      if (editingStageId != null) {
+        await axios.patch(`${API_URL}/wood-stages/${editingStageId}`, payload);
+      } else {
+        await axios.post(`${API_URL}/wood-stages`, payload);
+      }
       setStageForm(emptyStageForm);
+      setEditingStageId(null);
       loadAll();
     } catch (err) {
       setStageFormError(getApiErrorMessage(err, 'Could not reach the server. Check the console.'));
-      console.error('Failed to create wood stage', err);
+      console.error('Failed to save wood stage', err);
     } finally {
       setStageSubmitting(false);
+    }
+  };
+
+  const openEditStage = (stage: WoodStage) => {
+    setEditingStageId(stage.id);
+    setStageForm({
+      name: stage.name,
+      inputTypeId: String(stage.inputTypeId),
+      outputTypeId: String(stage.outputTypeId),
+      wageRatePerUnit: String(stage.wageRatePerUnit),
+      sequence: String(stage.sequence ?? 0),
+      mirrorToRawMaterialId: stage.mirrorToRawMaterialId ? String(stage.mirrorToRawMaterialId) : '',
+      defaultWasteTypeId: stage.defaultWasteTypeId ? String(stage.defaultWasteTypeId) : '',
+    });
+    setStageFormError(null);
+  };
+
+  const cancelEditStage = () => {
+    setEditingStageId(null);
+    setStageForm(emptyStageForm);
+    setStageFormError(null);
+  };
+
+  const handleStageDelete = async (stage: WoodStage) => {
+    if (!window.confirm(`Delete the "${stage.name}" stage? This can't be undone.`)) return;
+    setDeletingStageId(stage.id);
+    try {
+      await axios.delete(`${API_URL}/wood-stages/${stage.id}`);
+      if (editingStageId === stage.id) cancelEditStage();
+      loadAll();
+    } catch (err) {
+      window.alert(getApiErrorMessage(err, 'Failed to delete stage. Check the console.'));
+      console.error('Failed to delete wood stage', err);
+    } finally {
+      setDeletingStageId(null);
     }
   };
 
@@ -417,6 +460,69 @@ export default function WoodProcessing() {
                 </p>
               </div>
             ))}
+          </div>
+        )}
+      </div>
+
+      {/* Batch history -- every purchase and every processed batch, at
+          whatever price it actually cost that time. */}
+      <div className={cardClass}>
+        <div className="flex items-center justify-between border-b border-[#e8e8e8] pb-3 mb-4">
+          <h3 className="text-[1.05rem] font-extrabold text-[#1E1E1E]">
+            <i className="fa-solid fa-clock-rotate-left mr-2 text-[#e21e53]" />
+            Batch History
+          </h3>
+          <span className="rounded-full bg-[rgba(59,130,246,0.1)] text-[#3b82f6] text-[0.7rem] font-bold px-3 py-1">
+            {batches.length} {batches.length === 1 ? 'batch' : 'batches'}
+          </span>
+        </div>
+        {!loading && batches.length === 0 && (
+          <p className="text-[0.8rem] font-semibold text-[#545454]">
+            No batches yet -- record a purchase below, or run a processing entry.
+          </p>
+        )}
+        {batches.length > 0 && (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-[0.85rem]">
+              <thead>
+                <tr className="border-b border-[#e8e8e8] text-[0.72rem] uppercase tracking-[0.05em] text-[#545454]">
+                  <th className="py-2 pr-4 font-bold">Wood Type</th>
+                  <th className="py-2 pr-4 font-bold text-right">Quantity</th>
+                  <th className="py-2 pr-4 font-bold text-right">Unit Price</th>
+                  <th className="py-2 pr-4 font-bold text-right">Total Cost</th>
+                  <th className="py-2 pr-4 font-bold text-right">Remaining</th>
+                  <th className="py-2 pr-4 font-bold">Source</th>
+                  <th className="py-2 pr-4 font-bold">Date</th>
+                </tr>
+              </thead>
+              <tbody>
+                {batches.map((b) => (
+                  <tr key={b.id} className="border-b border-[#f1f1f1] last:border-0">
+                    <td className="py-3 pr-4 font-bold text-[#1E1E1E]">{b.woodTypeName}</td>
+                    <td className="py-3 pr-4 text-[#545454] text-right">{formatQty(b.quantity)}</td>
+                    <td className="py-3 pr-4 text-[#545454] text-right">৳{b.unitPrice.toFixed(2)}</td>
+                    <td className="py-3 pr-4 font-bold text-[#1E1E1E] text-right">৳{b.totalCost.toFixed(2)}</td>
+                    <td className="py-3 pr-4 text-right">
+                      <span
+                        className={
+                          b.quantityRemaining <= 0
+                            ? 'text-[#ef4444]'
+                            : b.quantityRemaining < b.quantity
+                              ? 'text-[#f59e0b]'
+                              : 'text-[#10b981]'
+                        }
+                      >
+                        {formatQty(b.quantityRemaining)}
+                      </span>
+                    </td>
+                    <td className="py-3 pr-4 text-[#545454]">
+                      {b.sourceEntryId ? `Processing entry #${b.sourceEntryId}` : 'Purchased'}
+                    </td>
+                    <td className="py-3 pr-4 text-[#545454]">{b.batchDate || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </div>
@@ -650,8 +756,8 @@ export default function WoodProcessing() {
 
         <div className={cardClass}>
           <h3 className="text-[1.05rem] font-extrabold text-[#1E1E1E] border-b border-[#e8e8e8] pb-3 mb-4">
-            <i className="fa-solid fa-square-plus mr-2 text-[#e21e53]" />
-            Add Stage
+            <i className={`fa-solid ${editingStageId != null ? 'fa-pen' : 'fa-square-plus'} mr-2 text-[#e21e53]`} />
+            {editingStageId != null ? 'Edit Stage' : 'Add Stage'}
           </h3>
           <form onSubmit={handleStageSubmit} className="flex flex-col gap-3">
             <div className="flex flex-col gap-[0.4rem]">
@@ -758,10 +864,22 @@ export default function WoodProcessing() {
                 ))}
               </select>
             </div>
-            <button type="submit" disabled={stageSubmitting} className={primaryBtnClass}>
-              <i className={`fa-solid ${stageSubmitting ? 'fa-spinner fa-spin' : 'fa-save'}`} />
-              {stageSubmitting ? 'Saving...' : 'Add Stage'}
-            </button>
+            <div className="flex gap-2">
+              <button type="submit" disabled={stageSubmitting} className={primaryBtnClass}>
+                <i className={`fa-solid ${stageSubmitting ? 'fa-spinner fa-spin' : 'fa-save'}`} />
+                {stageSubmitting ? 'Saving...' : editingStageId != null ? 'Save Changes' : 'Add Stage'}
+              </button>
+              {editingStageId != null && (
+                <button
+                  type="button"
+                  onClick={cancelEditStage}
+                  disabled={stageSubmitting}
+                  className="h-10 px-4 rounded-lg border border-[#e8e8e8] font-bold text-[0.85rem] text-[#545454] hover:bg-[#f7f7f7] cursor-pointer disabled:opacity-40"
+                >
+                  Cancel
+                </button>
+              )}
+            </div>
             {stageFormError && <p className="text-[0.8rem] font-semibold text-[#ef4444]">{stageFormError}</p>}
           </form>
         </div>
@@ -794,24 +912,27 @@ export default function WoodProcessing() {
                   <td className="py-3 pr-4 text-[#545454]">
                     {stage.mirrorToRawMaterialId ? 'Yes -- final product' : '—'}
                   </td>
+                  <td className="py-3 pr-4 text-right text-[#545454]">৳{stage.wageRatePerUnit.toFixed(2)}</td>
                   <td className="py-3 pr-4 text-right">
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={rateEdits[stage.id] ?? stage.wageRatePerUnit}
-                      onChange={(e) => setRateEdits((prev) => ({ ...prev, [stage.id]: e.target.value }))}
-                      className="w-24 text-right border border-[#e8e8e8] rounded-lg px-2 py-1 text-[0.85rem] outline-none focus:border-[#e21e53]"
-                    />
-                  </td>
-                  <td className="py-3 pr-4 text-right">
-                    <button
-                      type="button"
-                      onClick={() => handleRateSave(stage)}
-                      disabled={savingRateId === stage.id || rateEdits[stage.id] == null}
-                      className="h-8 px-3 rounded-lg bg-[#e21e53] text-white font-bold text-[0.78rem] hover:bg-[#c01745] disabled:opacity-40 cursor-pointer"
-                    >
-                      {savingRateId === stage.id ? 'Saving...' : 'Save'}
-                    </button>
+                    <div className="inline-flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => openEditStage(stage)}
+                        title="Edit stage"
+                        className="w-9 h-9 inline-flex items-center justify-center rounded-lg border border-[#e8e8e8] text-[#545454] hover:bg-[#f7f7f7] cursor-pointer"
+                      >
+                        <i className="fa-solid fa-pen" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleStageDelete(stage)}
+                        disabled={deletingStageId === stage.id}
+                        title="Delete stage"
+                        className="w-9 h-9 inline-flex items-center justify-center rounded-lg border border-[#e8e8e8] text-[#ef4444] hover:bg-[#fef2f2] cursor-pointer disabled:opacity-40"
+                      >
+                        <i className={`fa-solid ${deletingStageId === stage.id ? 'fa-spinner fa-spin' : 'fa-trash'}`} />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}

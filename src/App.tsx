@@ -22,6 +22,7 @@ import ShipmentBasic from './pages/ShipmentBasic'
 import ApprovalQueue from './pages/ApprovalQueue'
 import SystemSettings from './pages/SystemSettings'
 import UserManual from './pages/UserManual'
+import AiAssistant from './pages/AiAssistant'
 
 function App() {
   return (
@@ -50,6 +51,7 @@ function App() {
         <Route path="/approvals" element={<ApprovalQueue />} />
         <Route path="/settings" element={<SystemSettings />} />
         <Route path="/user-manual" element={<UserManual />} />
+        <Route path="/ai-assistant" element={<AiAssistant />} />
       </Route>
       </Route>
     </Routes>

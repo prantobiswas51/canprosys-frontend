@@ -78,6 +78,10 @@ const navGroups: NavGroup[] = [
     ],
   },
   {
+    label: 'Assistant',
+    items: [{ icon: 'fa-robot', label: 'AI Assistant', path: '/ai-assistant' }],
+  },
+  {
     label: 'Settings & Admin',
     items: [
       { icon: 'fa-list-check', label: 'Role Management', path: '/manage-roles', superAdminOnly: true },

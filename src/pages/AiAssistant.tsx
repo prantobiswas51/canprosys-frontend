@@ -30,7 +30,15 @@ export default function AiAssistant() {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    // Nothing to scroll to yet on first mount (empty state) -- without this
+    // guard, scrollIntoView still runs once with no messages and, since the
+    // page is taller than the viewport, drags the whole page down to bring
+    // the (already-visible) bottom marker into view instead of leaving you
+    // at the top where you landed. block: 'nearest' scopes the scroll to
+    // the chat panel itself once there are messages, so sending/receiving
+    // replies doesn't yank the outer page scroll either.
+    if (messages.length === 0) return;
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }, [messages, sending]);
 
   const send = async (text: string) => {

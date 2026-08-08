@@ -36,6 +36,19 @@ function currentMonth() {
   return new Date().toISOString().slice(0, 7);
 }
 
+// First/last day of a YYYY-MM month, as YYYY-MM-DD -- the default date
+// range shown when the page first loads (so it still reads as "this
+// month's loans" out of the box, same as before), and what a loan given
+// outside the current range gets snapped back to so the new row is
+// actually visible after creating it.
+function monthBounds(month: string) {
+  const [year, mon] = month.split('-').map(Number);
+  const from = `${month}-01`;
+  const lastDay = new Date(year, mon, 0).getDate();
+  const to = `${month}-${String(lastDay).padStart(2, '0')}`;
+  return { from, to };
+}
+
 const emptyLoanForm: LoanFormState = {
   employeeId: '',
   amount: '',
@@ -49,8 +62,16 @@ const cardClass =
 const inputClass =
   'w-full bg-white border border-[#e8e8e8] text-[#1E1E1E] px-[0.85rem] py-[0.65rem] rounded-lg text-[0.875rem] font-medium transition-all duration-200 outline-none focus:border-[#e21e53] focus:shadow-[0_0_0_3px_rgba(16,185,129,0.15)] disabled:opacity-60 disabled:cursor-not-allowed';
 
+const filterInputClass =
+  'h-10 rounded-lg border border-[#e8e8e8] bg-white px-3 text-[0.85rem] font-semibold text-[#1E1E1E] outline-none transition-all duration-200 focus:border-[#e21e53] focus:shadow-[0_0_0_3px_rgba(16,185,129,0.15)]';
+
 export default function Loans() {
-  const [selectedMonth, setSelectedMonth] = useState<string>(currentMonth());
+  const defaultRange = monthBounds(currentMonth());
+
+  const [employeeFilter, setEmployeeFilter] = useState<string>('');
+  const [fromDate, setFromDate] = useState<string>(defaultRange.from);
+  const [toDate, setToDate] = useState<string>(defaultRange.to);
+
   const [loans, setLoans] = useState<Loan[]>([]);
   const [loading, setLoading] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
@@ -65,11 +86,17 @@ export default function Loans() {
 
   const [deletingId, setDeletingId] = useState<number | null>(null);
 
-  const fetchLoans = useCallback(async (month: string) => {
+  const fetchLoans = useCallback(async (employeeId: string, from: string, to: string) => {
     setLoading(true);
     setListError(null);
     try {
-      const res = await axios.get<Loan[]>(`${API_URL}/loans`, { params: { month } });
+      const res = await axios.get<Loan[]>(`${API_URL}/loans`, {
+        params: {
+          employeeId: employeeId || undefined,
+          from: from || undefined,
+          to: to || undefined,
+        },
+      });
       setLoans(res.data);
     } catch (err) {
       setListError(getApiErrorMessage(err, 'Could not reach the server. Check the console.'));
@@ -91,12 +118,21 @@ export default function Loans() {
   }, []);
 
   useEffect(() => {
-    fetchLoans(selectedMonth);
-  }, [selectedMonth, fetchLoans]);
+    fetchLoans(employeeFilter, fromDate, toDate);
+  }, [employeeFilter, fromDate, toDate, fetchLoans]);
 
   useEffect(() => {
     fetchEmployees();
   }, [fetchEmployees]);
+
+  const filtersActive =
+    employeeFilter !== '' || fromDate !== defaultRange.from || toDate !== defaultRange.to;
+
+  const clearFilters = () => {
+    setEmployeeFilter('');
+    setFromDate(defaultRange.from);
+    setToDate(defaultRange.to);
+  };
 
   const openModal = () => {
     setForm(emptyLoanForm);
@@ -140,13 +176,15 @@ export default function Loans() {
       });
       setModalOpen(false);
       fetchEmployees();
-      // If the loan was given in a different month than the one currently
-      // being viewed, jump to that month so the new row is actually visible.
-      const loanMonth = form.givenDate.slice(0, 7);
-      if (loanMonth !== selectedMonth) {
-        setSelectedMonth(loanMonth);
+      // If the loan was given outside the date range currently being
+      // viewed, widen the range to that loan's month so the new row is
+      // actually visible instead of silently filtered out.
+      if (form.givenDate < fromDate || form.givenDate > toDate) {
+        const bounds = monthBounds(form.givenDate.slice(0, 7));
+        setFromDate(bounds.from);
+        setToDate(bounds.to);
       } else {
-        fetchLoans(selectedMonth);
+        fetchLoans(employeeFilter, fromDate, toDate);
       }
     } catch (err) {
       setFormError(getApiErrorMessage(err, 'Could not reach the server. Check the console.'));
@@ -163,7 +201,7 @@ export default function Loans() {
     setDeletingId(loan.id);
     try {
       await axios.delete(`${API_URL}/loans/${loan.id}`);
-      fetchLoans(selectedMonth);
+      fetchLoans(employeeFilter, fromDate, toDate);
       fetchEmployees();
     } catch (err) {
       alert(getApiErrorMessage(err, 'Could not reach the server. Check the console.'));
@@ -182,25 +220,66 @@ export default function Loans() {
           <h2 className="text-[1.4rem] font-extrabold text-[#1E1E1E] mb-2">Loans</h2>
           <p className="text-[0.9rem] text-[#545454]">Cash advances given to employees against future wages.</p>
         </div>
-        <div className="flex items-center gap-3">
-          <input
-            type="month"
-            value={selectedMonth}
-            onChange={(e) => setSelectedMonth(e.target.value)}
-            className="border border-[#e8e8e8] rounded-lg px-3 py-2 text-[0.85rem] font-semibold text-[#1E1E1E] outline-none focus:border-[#e21e53] focus:shadow-[0_0_0_3px_rgba(16,185,129,0.15)]"
-          />
-          <button
-            type="button"
-            onClick={openModal}
-            className="h-10 px-4 flex items-center gap-2 rounded-lg bg-[#e21e53] text-white font-bold text-[0.875rem] transition-all duration-200 hover:bg-[#c01745] hover:-translate-y-px hover:shadow-[0_6px_14px_rgba(226,30,83,0.25)] cursor-pointer"
-          >
-            <i className="fa-solid fa-hand-holding-dollar" />
-            New Loan
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={openModal}
+          className="h-10 px-4 flex items-center gap-2 rounded-lg bg-[#e21e53] text-white font-bold text-[0.875rem] transition-all duration-200 hover:bg-[#c01745] hover:-translate-y-px hover:shadow-[0_6px_14px_rgba(226,30,83,0.25)] cursor-pointer"
+        >
+          <i className="fa-solid fa-hand-holding-dollar" />
+          New Loan
+        </button>
       </div>
 
       {employeesError && <p className="text-[0.8rem] font-semibold text-[#ef4444]">{employeesError}</p>}
+
+      {/* ══════════ FILTERS ══════════ */}
+      <div className={`${cardClass} p-4 flex flex-wrap items-end gap-3`}>
+        <div className="flex flex-col gap-1">
+          <label className="text-[0.68rem] font-bold uppercase tracking-[0.05em] text-[#545454]">Employee</label>
+          <select
+            value={employeeFilter}
+            onChange={(e) => setEmployeeFilter(e.target.value)}
+            className={`${filterInputClass} w-[220px]`}
+          >
+            <option value="">All Employees</option>
+            {employees.map((emp) => (
+              <option key={emp.id} value={emp.id}>
+                {emp.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className="text-[0.68rem] font-bold uppercase tracking-[0.05em] text-[#545454]">From</label>
+          <input
+            type="date"
+            value={fromDate}
+            max={toDate}
+            onChange={(e) => setFromDate(e.target.value)}
+            className={filterInputClass}
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className="text-[0.68rem] font-bold uppercase tracking-[0.05em] text-[#545454]">To</label>
+          <input
+            type="date"
+            value={toDate}
+            min={fromDate}
+            onChange={(e) => setToDate(e.target.value)}
+            className={filterInputClass}
+          />
+        </div>
+        {filtersActive && (
+          <button
+            type="button"
+            onClick={clearFilters}
+            className="h-10 px-3 flex items-center gap-2 rounded-lg border border-[#e8e8e8] text-[#545454] font-bold text-[0.8rem] hover:bg-[#f8fafc] hover:text-[#1E1E1E] transition-colors duration-200 cursor-pointer"
+          >
+            <i className="fa-solid fa-xmark" />
+            Clear Filters
+          </button>
+        )}
+      </div>
 
       <div className="grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-4">
         <div className={`${cardClass} p-5 flex items-center gap-3`}>
@@ -208,7 +287,7 @@ export default function Loans() {
             <i className="fa-solid fa-hand-holding-dollar" />
           </div>
           <div>
-            <p className="text-[0.68rem] font-bold uppercase tracking-[0.05em] text-[#545454] m-0">Loans This Month</p>
+            <p className="text-[0.68rem] font-bold uppercase tracking-[0.05em] text-[#545454] m-0">Loans (Filtered)</p>
             <p className="text-[1.1rem] font-extrabold text-[#1E1E1E] m-0">{loans.length}</p>
           </div>
         </div>
@@ -227,7 +306,11 @@ export default function Loans() {
       {!loading && listError && <p className="text-[0.8rem] font-semibold text-[#ef4444]">{listError}</p>}
       {!loading && !listError && loans.length === 0 && (
         <p className="text-[0.8rem] font-semibold text-[#545454]">
-          No loans recorded for {selectedMonth}. Click "New Loan" to add one.
+          No loans match these filters. {filtersActive && (
+            <button type="button" onClick={clearFilters} className="text-[#e21e53] hover:underline cursor-pointer font-bold">
+              Clear filters
+            </button>
+          )}
         </p>
       )}
 

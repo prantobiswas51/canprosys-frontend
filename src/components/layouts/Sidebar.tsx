@@ -60,6 +60,10 @@ const navGroups: NavGroup[] = [
     ],
   },
   {
+    label: 'Assistant',
+    items: [{ icon: 'fa-robot', label: 'AI Assistant', path: '/ai-assistant' }],
+  },
+  {
     label: 'Stock',
     items: [
       { icon: 'fa-warehouse', label: 'Raw Materials Inventory', path: '/inventory' },
@@ -76,10 +80,6 @@ const navGroups: NavGroup[] = [
       { icon: 'fa-users-gear', label: 'Employee Dashboard', path: '/employee-dashboard' },
       { icon: 'fa-user-group', label: 'Employees', path: '/employees' },
     ],
-  },
-  {
-    label: 'Assistant',
-    items: [{ icon: 'fa-robot', label: 'AI Assistant', path: '/ai-assistant' }],
   },
   {
     label: 'Settings & Admin',

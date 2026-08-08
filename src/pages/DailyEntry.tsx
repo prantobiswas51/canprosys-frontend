@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import MultiSelect from '../components/MultiSelect';
+import Modal from '../components/Modal';
 import { getApiErrorMessage } from '../utils/apiError';
 import { formatQty } from '../utils/formatNumber';
 
@@ -31,6 +32,7 @@ interface DailyEntryRecord {
   task: TaskOption;
   employees: EmployeeOption[];
   weightKg: number;
+  recipeId?: number;
   productName?: string;
   createdAt: string;
 }
@@ -60,6 +62,20 @@ export default function DailyEntry() {
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+
+  // Edit modal state -- separate from the create form above so editing one
+  // entry can't accidentally clobber whatever's half-typed into "New Daily
+  // Entry" (or vice versa).
+  const [editingEntry, setEditingEntry] = useState<DailyEntryRecord | null>(null);
+  const [editTaskId, setEditTaskId] = useState('');
+  const [editEmployeeIds, setEditEmployeeIds] = useState<number[]>([]);
+  const [editWeightKg, setEditWeightKg] = useState('');
+  const [editRecipeId, setEditRecipeId] = useState('');
+  const [editSubmitting, setEditSubmitting] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const loadOptions = useCallback(async () => {
     setLoadingOptions(true);
@@ -147,6 +163,77 @@ export default function DailyEntry() {
       console.error('Failed to save daily entry', err);
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const openEdit = (entry: DailyEntryRecord) => {
+    setEditingEntry(entry);
+    setEditTaskId(String(entry.task.id));
+    setEditEmployeeIds(entry.employees.map((e) => e.id));
+    setEditWeightKg(String(entry.weightKg));
+    setEditRecipeId(entry.recipeId ? String(entry.recipeId) : '');
+    setEditError(null);
+  };
+
+  const closeEdit = () => {
+    setEditingEntry(null);
+    setEditError(null);
+  };
+
+  const editSelectedTask = tasks.find((t) => String(t.id) === editTaskId);
+  const editIsProductApplicable = !!editSelectedTask && editSelectedTask.requiresProduct;
+
+  const handleEditTaskChange = (value: string) => {
+    setEditTaskId(value);
+    setEditRecipeId('');
+  };
+
+  const handleEditSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!editingEntry) return;
+    setEditError(null);
+
+    if (editEmployeeIds.length === 0) {
+      setEditError('Select at least one artisan.');
+      return;
+    }
+    if (editIsProductApplicable && !editRecipeId) {
+      setEditError('Select a product for this task.');
+      return;
+    }
+
+    setEditSubmitting(true);
+    try {
+      await axios.patch(`${API_URL}/daily-entries/${editingEntry.id}`, {
+        taskId: Number(editTaskId),
+        employeeIds: editEmployeeIds,
+        weightKg: Number(editWeightKg),
+        recipeId: editIsProductApplicable ? Number(editRecipeId) : undefined,
+      });
+      closeEdit();
+      loadEntries();
+    } catch (err) {
+      setEditError(getApiErrorMessage(err, 'Could not reach the server. Check the console.'));
+      console.error('Failed to update daily entry', err);
+    } finally {
+      setEditSubmitting(false);
+    }
+  };
+
+  const handleDelete = async (entry: DailyEntryRecord) => {
+    if (!window.confirm(`Delete this "${entry.task?.name ?? 'entry'}" entry? This reverses any stock and payout changes it made.`)) {
+      return;
+    }
+    setDeleteError(null);
+    setDeletingId(entry.id);
+    try {
+      await axios.delete(`${API_URL}/daily-entries/${entry.id}`);
+      loadEntries();
+    } catch (err) {
+      setDeleteError(getApiErrorMessage(err, 'Could not reach the server. Check the console.'));
+      console.error('Failed to delete daily entry', err);
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -276,6 +363,7 @@ export default function DailyEntry() {
                   <th className="py-2 pr-4 font-bold">Artisan(s)</th>
                   <th className="py-2 pr-4 font-bold text-center">Unit (Kg/Pieces)</th>
                   <th className="py-2 pr-4 font-bold">Created At</th>
+                  <th className="py-2 pr-4 font-bold text-center">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -297,13 +385,127 @@ export default function DailyEntry() {
                         minute: '2-digit',
                       })}
                     </td>
+                    <td className="py-3 pr-4">
+                      <div className="flex items-center justify-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => openEdit(entry)}
+                          title="Edit entry"
+                          className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#e8e8e8] text-[#545454] transition-colors duration-200 hover:border-[#e21e53] hover:text-[#e21e53] cursor-pointer"
+                        >
+                          <i className="fa-solid fa-pen" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDelete(entry)}
+                          disabled={deletingId === entry.id}
+                          title="Delete entry"
+                          className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#e8e8e8] text-[#545454] transition-colors duration-200 hover:border-[#ef4444] hover:text-[#ef4444] disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                        >
+                          <i className={`fa-solid ${deletingId === entry.id ? 'fa-spinner fa-spin' : 'fa-trash'}`} />
+                        </button>
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
         )}
+
+        {deleteError && <p className="mt-3 text-[0.8rem] font-semibold text-[#ef4444]">{deleteError}</p>}
       </div>
+
+      <Modal open={!!editingEntry} onClose={closeEdit} title="Edit Daily Entry">
+        <form onSubmit={handleEditSubmit} className="flex flex-col gap-4">
+          <div className="flex flex-col gap-[0.4rem]">
+            <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Task Name</label>
+            <select
+              value={editTaskId}
+              onChange={(e) => handleEditTaskChange(e.target.value)}
+              required
+              disabled={editSubmitting}
+              className={inputClass}
+            >
+              <option value="" disabled>
+                Select a task...
+              </option>
+              {tasks.map((task) => (
+                <option key={task.id} value={task.id}>
+                  {task.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {editIsProductApplicable && (
+            <div className="flex flex-col gap-[0.4rem]">
+              <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Product Name</label>
+              <select
+                value={editRecipeId}
+                onChange={(e) => setEditRecipeId(e.target.value)}
+                required
+                disabled={editSubmitting}
+                className={inputClass}
+              >
+                <option value="" disabled>
+                  Select a product...
+                </option>
+                {recipes.map((recipe) => (
+                  <option key={recipe.id} value={recipe.id}>
+                    {recipe.product} ({recipe.sku})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          <div className="flex flex-col gap-[0.4rem]">
+            <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Select Artisan</label>
+            <MultiSelect
+              options={activeEmployees.map((employee) => ({ id: employee.id, label: employee.name }))}
+              selectedIds={editEmployeeIds}
+              onChange={setEditEmployeeIds}
+              placeholder="Select artisan(s)..."
+              disabled={editSubmitting}
+            />
+          </div>
+
+          <div className="flex flex-col gap-[0.4rem]">
+            <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Unit (kg/Pieces)</label>
+            <input
+              type="number"
+              step="any"
+              value={editWeightKg}
+              onChange={(e) => setEditWeightKg(e.target.value)}
+              required
+              disabled={editSubmitting}
+              className={inputClass}
+            />
+          </div>
+
+          {editError && <p className="text-[0.8rem] font-semibold text-[#ef4444]">{editError}</p>}
+
+          <div className="flex justify-end gap-2 pt-2">
+            <button
+              type="button"
+              onClick={closeEdit}
+              disabled={editSubmitting}
+              className="h-10 px-4 rounded-lg border border-[#e8e8e8] text-[#545454] font-bold text-[0.875rem] transition-colors duration-200 hover:text-[#1E1E1E] disabled:opacity-60 cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={editSubmitting}
+              className="h-10 px-5 flex items-center justify-center gap-2 rounded-lg bg-[#e21e53] text-white font-bold text-[0.875rem] transition-all duration-200 hover:bg-[#c01745] disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
+            >
+              <i className={`fa-solid ${editSubmitting ? 'fa-spinner fa-spin' : 'fa-save'}`} />
+              {editSubmitting ? 'Saving...' : 'Save Changes'}
+            </button>
+          </div>
+        </form>
+      </Modal>
     </div>
   );
 }

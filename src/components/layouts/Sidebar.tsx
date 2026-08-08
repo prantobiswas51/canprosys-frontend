@@ -77,6 +77,7 @@ const navGroups: NavGroup[] = [
     items: [
       { icon: 'fa-wallet', label: 'Payouts', path: '/payouts' },
       { icon: 'fa-hand-holding-dollar', label: 'Loans', path: '/loans' },
+      { icon: 'fa-money-bill-transfer', label: 'Maintenance Costs', path: '/maintenance-costs' },
       { icon: 'fa-users-gear', label: 'Employee Dashboard', path: '/employee-dashboard' },
       { icon: 'fa-user-group', label: 'Employees', path: '/employees' },
     ],

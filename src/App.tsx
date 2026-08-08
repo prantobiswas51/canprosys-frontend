@@ -23,6 +23,7 @@ import ApprovalQueue from './pages/ApprovalQueue'
 import SystemSettings from './pages/SystemSettings'
 import UserManual from './pages/UserManual'
 import AiAssistant from './pages/AiAssistant'
+import MaintenanceCosts from './pages/MaintenanceCosts'
 
 function App() {
   return (
@@ -52,6 +53,7 @@ function App() {
         <Route path="/settings" element={<SystemSettings />} />
         <Route path="/user-manual" element={<UserManual />} />
         <Route path="/ai-assistant" element={<AiAssistant />} />
+        <Route path="/maintenance-costs" element={<MaintenanceCosts />} />
       </Route>
       </Route>
     </Routes>

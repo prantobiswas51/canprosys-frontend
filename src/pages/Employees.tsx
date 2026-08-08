@@ -6,6 +6,7 @@ import { getApiErrorMessage } from '../utils/apiError';
 const API_URL = import.meta.env.VITE_API_URL;
 
 type EmployeeStatus = 'active' | 'inactive';
+type NidStatus = 'pending' | 'approved' | 'rejected';
 
 interface Employee {
   id: number;
@@ -15,6 +16,9 @@ interface Employee {
   pin?: number;
   balance: number;
   createdAt?: string;
+  nidFrontImage?: string;
+  nidBackImage?: string;
+  nidStatus: NidStatus;
 }
 
 interface EmployeeFormState {
@@ -54,6 +58,30 @@ const inputClass =
 const cardClass =
   'bg-white border border-[#e8e8e8] rounded-xl p-5 shadow-[0_4px_6px_-1px_rgba(0,0,0,0.08),0_2px_4px_-2px_rgba(0,0,0,0.08)]';
 
+const nidBadgeClass: Record<NidStatus, string> = {
+  pending: 'bg-[rgba(245,158,11,0.1)] text-[#f59e0b]',
+  approved: 'bg-[rgba(16,185,129,0.1)] text-[#10b981]',
+  rejected: 'bg-[rgba(239,68,68,0.1)] text-[#ef4444]',
+};
+
+const nidBadgeLabel: Record<NidStatus, string> = {
+  pending: 'Pending',
+  approved: 'Approved',
+  rejected: 'Rejected',
+};
+
+function NidBadge({ status }: { status: NidStatus }) {
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-full px-[0.6rem] py-[0.2rem] text-[0.7rem] font-bold ${nidBadgeClass[status]}`}>
+      {nidBadgeLabel[status]}
+    </span>
+  );
+}
+
+function imageUrl(path?: string) {
+  return path ? `${API_URL}${path}` : undefined;
+}
+
 export default function Employees() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(false);
@@ -62,19 +90,30 @@ export default function Employees() {
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
+  const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
   const [form, setForm] = useState<EmployeeFormState>(emptyForm);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
+  // NID front/back -- the actual File objects picked in the Add/Edit modal.
+  // Uploaded as a follow-up multipart request after the employee record
+  // itself is saved (create needs the new id first; edit already has one).
+  const [nidFrontFile, setNidFrontFile] = useState<File | null>(null);
+  const [nidBackFile, setNidBackFile] = useState<File | null>(null);
+  const [nidFrontPreview, setNidFrontPreview] = useState<string | null>(null);
+  const [nidBackPreview, setNidBackPreview] = useState<string | null>(null);
+
   const [deletingId, setDeletingId] = useState<number | null>(null);
 
-  // Detail popup -- payout + loan history for whichever employee row was
-  // clicked.
+  // Detail popup -- payout + loan history, plus NID review, for whichever
+  // employee row was clicked.
   const [detailEmployee, setDetailEmployee] = useState<Employee | null>(null);
   const [detailPayouts, setDetailPayouts] = useState<Payout[]>([]);
   const [detailLoans, setDetailLoans] = useState<Loan[]>([]);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
+  const [nidActionLoading, setNidActionLoading] = useState(false);
+  const [nidActionError, setNidActionError] = useState<string | null>(null);
 
   const fetchEmployees = useCallback(async (search: string) => {
     setLoading(true);
@@ -100,21 +139,50 @@ export default function Employees() {
     return () => clearTimeout(handle);
   }, [searchQuery, fetchEmployees]);
 
+  // Object URL previews for whatever's currently picked in the file inputs
+  // -- created/revoked as the selection changes, instead of regenerating a
+  // fresh (leaked) blob URL on every unrelated re-render.
+  useEffect(() => {
+    if (!nidFrontFile) {
+      setNidFrontPreview(null);
+      return;
+    }
+    const url = URL.createObjectURL(nidFrontFile);
+    setNidFrontPreview(url);
+    return () => URL.revokeObjectURL(url);
+  }, [nidFrontFile]);
+
+  useEffect(() => {
+    if (!nidBackFile) {
+      setNidBackPreview(null);
+      return;
+    }
+    const url = URL.createObjectURL(nidBackFile);
+    setNidBackPreview(url);
+    return () => URL.revokeObjectURL(url);
+  }, [nidBackFile]);
+
   const openCreateModal = () => {
     setEditingId(null);
+    setEditingEmployee(null);
     setForm(emptyForm);
+    setNidFrontFile(null);
+    setNidBackFile(null);
     setFormError(null);
     setModalOpen(true);
   };
 
   const openEditModal = (employee: Employee) => {
     setEditingId(employee.id);
+    setEditingEmployee(employee);
     setForm({
       name: employee.name,
       phone: employee.phone ?? '',
       status: employee.status,
       pin: employee.pin != null ? String(employee.pin) : '',
     });
+    setNidFrontFile(null);
+    setNidBackFile(null);
     setFormError(null);
     setModalOpen(true);
   };
@@ -126,6 +194,20 @@ export default function Employees() {
 
   const handleChange = (field: keyof EmployeeFormState, value: string) => {
     setForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  // Uploads whichever NID file(s) were picked -- a no-op if neither was
+  // touched. Failure here is reported but doesn't undo the employee
+  // create/update that already succeeded; the user can just retry the
+  // upload from the Edit modal.
+  const uploadNidIfNeeded = async (employeeId: number) => {
+    if (!nidFrontFile && !nidBackFile) return;
+    const fd = new FormData();
+    if (nidFrontFile) fd.append('nidFront', nidFrontFile);
+    if (nidBackFile) fd.append('nidBack', nidBackFile);
+    await axios.post(`${API_URL}/employees/${employeeId}/nid`, fd, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
   };
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -141,11 +223,23 @@ export default function Employees() {
     };
 
     try {
+      let employeeId = editingId;
       if (editingId != null) {
         await axios.patch(`${API_URL}/employees/${editingId}`, payload);
       } else {
-        await axios.post(`${API_URL}/employees`, payload);
+        const res = await axios.post<Employee>(`${API_URL}/employees`, payload);
+        employeeId = res.data.id;
       }
+
+      if (employeeId != null) {
+        try {
+          await uploadNidIfNeeded(employeeId);
+        } catch (nidErr) {
+          console.error('Failed to upload NID images', nidErr);
+          alert(getApiErrorMessage(nidErr, 'Employee saved, but the NID image upload failed. Try again from Edit.'));
+        }
+      }
+
       setModalOpen(false);
       fetchEmployees(searchQuery);
     } catch (err) {
@@ -173,6 +267,7 @@ export default function Employees() {
   const openDetailModal = async (employee: Employee) => {
     setDetailEmployee(employee);
     setDetailError(null);
+    setNidActionError(null);
     setDetailLoading(true);
     try {
       const [payoutsRes, loansRes] = await Promise.all([
@@ -194,6 +289,23 @@ export default function Employees() {
     setDetailPayouts([]);
     setDetailLoans([]);
     setDetailError(null);
+    setNidActionError(null);
+  };
+
+  const handleNidDecision = async (status: 'approved' | 'rejected') => {
+    if (!detailEmployee) return;
+    setNidActionError(null);
+    setNidActionLoading(true);
+    try {
+      const res = await axios.patch<Employee>(`${API_URL}/employees/${detailEmployee.id}/nid-status`, { status });
+      setDetailEmployee(res.data);
+      setEmployees((prev) => prev.map((emp) => (emp.id === res.data.id ? res.data : emp)));
+    } catch (err) {
+      setNidActionError(getApiErrorMessage(err, 'Could not update NID status.'));
+      console.error('Failed to update NID status', err);
+    } finally {
+      setNidActionLoading(false);
+    }
   };
 
   const totalPayouts = detailPayouts.reduce((sum, p) => sum + p.amount, 0);
@@ -250,6 +362,7 @@ export default function Employees() {
                   <th className="py-2 pr-4 font-bold">Phone</th>
                   <th className="py-2 pr-4 font-bold">Pin</th>
                   <th className="py-2 pr-4 font-bold">Status</th>
+                  <th className="py-2 pr-4 font-bold">NID</th>
                   <th className="py-2 pr-4 font-bold text-right">Balance (৳)</th>
                   <th className="py-2 pr-4 font-bold text-right">Actions</th>
                 </tr>
@@ -296,6 +409,9 @@ export default function Employees() {
                         />
                         {employee.status === 'active' ? 'Active' : 'Inactive'}
                       </span>
+                    </td>
+                    <td className="py-3 pr-4">
+                      <NidBadge status={employee.nidStatus} />
                     </td>
                     <td className="py-3 pr-4 text-right font-bold text-[#1E1E1E]">
                       ৳ {employee.balance.toFixed(2)}
@@ -387,6 +503,52 @@ export default function Employees() {
             </select>
           </div>
 
+          <div className="flex flex-col gap-[0.4rem] rounded-xl border border-[#e8e8e8] bg-[#f8fafc] p-3">
+            <div className="flex items-center justify-between">
+              <label className="text-[0.8rem] font-bold text-[#1E1E1E]">NID Verification</label>
+              {editingEmployee && <NidBadge status={editingEmployee.nidStatus} />}
+            </div>
+            <p className="text-[0.72rem] text-[#545454] -mt-1">
+              Uploading an image (re)sets verification status to Pending.
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="flex flex-col gap-[0.35rem]">
+                <span className="text-[0.7rem] font-bold uppercase tracking-[0.05em] text-[#545454]">Front</span>
+                {(nidFrontPreview || editingEmployee?.nidFrontImage) && (
+                  <img
+                    src={nidFrontPreview ?? imageUrl(editingEmployee?.nidFrontImage)}
+                    alt="NID front"
+                    className="h-24 w-full rounded-lg border border-[#e8e8e8] object-cover bg-white"
+                  />
+                )}
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => setNidFrontFile(e.target.files?.[0] ?? null)}
+                  disabled={submitting}
+                  className="text-[0.72rem] text-[#545454] file:mr-2 file:rounded-md file:border-0 file:bg-white file:px-2 file:py-1 file:text-[0.7rem] file:font-bold file:text-[#e21e53] disabled:opacity-60"
+                />
+              </div>
+              <div className="flex flex-col gap-[0.35rem]">
+                <span className="text-[0.7rem] font-bold uppercase tracking-[0.05em] text-[#545454]">Back</span>
+                {(nidBackPreview || editingEmployee?.nidBackImage) && (
+                  <img
+                    src={nidBackPreview ?? imageUrl(editingEmployee?.nidBackImage)}
+                    alt="NID back"
+                    className="h-24 w-full rounded-lg border border-[#e8e8e8] object-cover bg-white"
+                  />
+                )}
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => setNidBackFile(e.target.files?.[0] ?? null)}
+                  disabled={submitting}
+                  className="text-[0.72rem] text-[#545454] file:mr-2 file:rounded-md file:border-0 file:bg-white file:px-2 file:py-1 file:text-[0.7rem] file:font-bold file:text-[#e21e53] disabled:opacity-60"
+                />
+              </div>
+            </div>
+          </div>
+
           {formError && <p className="text-[0.8rem] font-semibold text-[#ef4444]">{formError}</p>}
 
           <div className="flex justify-end gap-2 pt-2">
@@ -455,6 +617,84 @@ export default function Employees() {
                 <p className="text-[0.68rem] font-bold uppercase tracking-[0.05em] text-[#545454] m-0">Current Balance</p>
                 <p className="text-[0.95rem] font-extrabold text-[#e21e53] m-0">৳ {detailEmployee.balance.toFixed(2)}</p>
               </div>
+            </div>
+
+            <div className="rounded-xl border border-[#e8e8e8] p-4">
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="text-[0.85rem] font-extrabold text-[#1E1E1E]">
+                  <i className="fa-solid fa-id-card mr-1 text-[#e21e53]" />
+                  NID Verification
+                </h4>
+                <NidBadge status={detailEmployee.nidStatus} />
+              </div>
+
+              {!detailEmployee.nidFrontImage && !detailEmployee.nidBackImage ? (
+                <p className="text-[0.78rem] text-[#545454]">
+                  No NID images uploaded yet -- add them from Edit.
+                </p>
+              ) : (
+                <div className="grid grid-cols-2 gap-3 mb-3">
+                  <div>
+                    <p className="text-[0.68rem] font-bold uppercase tracking-[0.05em] text-[#545454] mb-1">Front</p>
+                    {detailEmployee.nidFrontImage ? (
+                      <a href={imageUrl(detailEmployee.nidFrontImage)} target="_blank" rel="noreferrer">
+                        <img
+                          src={imageUrl(detailEmployee.nidFrontImage)}
+                          alt="NID front"
+                          className="h-28 w-full rounded-lg border border-[#e8e8e8] object-cover"
+                        />
+                      </a>
+                    ) : (
+                      <div className="h-28 w-full rounded-lg border border-dashed border-[#e8e8e8] flex items-center justify-center text-[0.72rem] text-[#545454]">
+                        Not uploaded
+                      </div>
+                    )}
+                  </div>
+                  <div>
+                    <p className="text-[0.68rem] font-bold uppercase tracking-[0.05em] text-[#545454] mb-1">Back</p>
+                    {detailEmployee.nidBackImage ? (
+                      <a href={imageUrl(detailEmployee.nidBackImage)} target="_blank" rel="noreferrer">
+                        <img
+                          src={imageUrl(detailEmployee.nidBackImage)}
+                          alt="NID back"
+                          className="h-28 w-full rounded-lg border border-[#e8e8e8] object-cover"
+                        />
+                      </a>
+                    ) : (
+                      <div className="h-28 w-full rounded-lg border border-dashed border-[#e8e8e8] flex items-center justify-center text-[0.72rem] text-[#545454]">
+                        Not uploaded
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {nidActionError && (
+                <p className="text-[0.78rem] font-semibold text-[#ef4444] mb-2">{nidActionError}</p>
+              )}
+
+              {(detailEmployee.nidFrontImage || detailEmployee.nidBackImage) && (
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleNidDecision('approved')}
+                    disabled={nidActionLoading || detailEmployee.nidStatus === 'approved'}
+                    className="h-9 px-3 flex items-center gap-2 rounded-lg bg-[#10b981] text-white font-bold text-[0.8rem] hover:bg-[#0ea371] transition-colors duration-200 disabled:opacity-50 cursor-pointer"
+                  >
+                    <i className={`fa-solid ${nidActionLoading ? 'fa-spinner fa-spin' : 'fa-check'}`} />
+                    Approve
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleNidDecision('rejected')}
+                    disabled={nidActionLoading || detailEmployee.nidStatus === 'rejected'}
+                    className="h-9 px-3 flex items-center gap-2 rounded-lg border border-[#ef4444] text-[#ef4444] font-bold text-[0.8rem] hover:bg-[rgba(239,68,68,0.08)] transition-colors duration-200 disabled:opacity-50 cursor-pointer"
+                  >
+                    <i className={`fa-solid ${nidActionLoading ? 'fa-spinner fa-spin' : 'fa-xmark'}`} />
+                    Reject
+                  </button>
+                </div>
+              )}
             </div>
 
             {detailLoading && <p className="text-[0.8rem] font-semibold text-[#545454]">Loading history...</p>}

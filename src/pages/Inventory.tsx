@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
+import Modal from '../components/Modal';
 import { getApiErrorMessage } from '../utils/apiError';
 import { formatQty } from '../utils/formatNumber';
 
@@ -80,6 +81,11 @@ export default function Inventory() {
   const [batchSubmitting, setBatchSubmitting] = useState(false);
   const [batchFormError, setBatchFormError] = useState<string | null>(null);
   const [deletingBatchId, setDeletingBatchId] = useState<number | null>(null);
+
+  const [editingBatch, setEditingBatch] = useState<MaterialBatch | null>(null);
+  const [editBatchForm, setEditBatchForm] = useState({ quantityPurchased: '', unitPrice: '', purchaseDate: '' });
+  const [editBatchSubmitting, setEditBatchSubmitting] = useState(false);
+  const [editBatchError, setEditBatchError] = useState<string | null>(null);
 
   /* ────────── Fetchers ────────── */
   const fetchRawMaterials = useCallback(async () => {
@@ -225,6 +231,50 @@ export default function Inventory() {
       window.alert(getApiErrorMessage(err, 'Failed to delete batch. Check the console.'));
     } finally {
       setDeletingBatchId(null);
+    }
+  };
+
+  const openEditBatch = (batch: MaterialBatch) => {
+    setEditingBatch(batch);
+    setEditBatchForm({
+      quantityPurchased: String(batch.quantityPurchased),
+      unitPrice: String(batch.unitPrice),
+      purchaseDate: batch.purchaseDate ?? '',
+    });
+    setEditBatchError(null);
+  };
+
+  const closeEditBatch = () => {
+    setEditingBatch(null);
+    setEditBatchError(null);
+  };
+
+  const handleEditBatchSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!editingBatch) return;
+    setEditBatchError(null);
+
+    const quantityPurchased = parseFloat(editBatchForm.quantityPurchased);
+    const unitPrice = parseFloat(editBatchForm.unitPrice);
+    if (isNaN(quantityPurchased) || quantityPurchased <= 0 || isNaN(unitPrice) || unitPrice < 0) {
+      setEditBatchError('Enter a valid quantity and unit price.');
+      return;
+    }
+
+    setEditBatchSubmitting(true);
+    try {
+      await axios.patch(`${API_URL}/material-batches/${editingBatch.id}`, {
+        quantityPurchased,
+        unitPrice,
+        purchaseDate: editBatchForm.purchaseDate || undefined,
+      });
+      closeEditBatch();
+      fetchBatches();
+    } catch (err) {
+      setEditBatchError(getApiErrorMessage(err, 'Could not reach the server. Check the console.'));
+      console.error('Failed to update material batch', err);
+    } finally {
+      setEditBatchSubmitting(false);
     }
   };
 
@@ -479,7 +529,15 @@ export default function Inventory() {
                     </td>
                     <td className="py-3 pr-3 text-[0.8rem] font-medium text-[#545454]">{b.purchaseDate || '—'}</td>
                     <td className="py-3 pr-3">
-                      <div className="flex justify-end">
+                      <div className="flex justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => openEditBatch(b)}
+                          className="h-8 w-8 flex items-center justify-center rounded-lg border border-[#e8e8e8] text-[#545454] hover:bg-[#f8fafc] hover:text-[#1E1E1E] transition-colors duration-200 cursor-pointer"
+                          title="Edit"
+                        >
+                          <i className="fa-solid fa-pen" />
+                        </button>
                         <button
                           type="button"
                           onClick={() => handleBatchDelete(b.id)}
@@ -498,6 +556,61 @@ export default function Inventory() {
           </div>
         )}
       </div>
+
+      <Modal open={!!editingBatch} onClose={closeEditBatch} title="Edit Purchase Batch">
+        <form onSubmit={handleEditBatchSubmit} className="flex flex-col gap-4">
+          <p className="text-[0.8rem] text-[#545454]">
+            {editingBatch?.rawMaterialName}
+            {editingBatch?.rawMaterialUnit && ` (${editingBatch.rawMaterialUnit})`}
+          </p>
+          <div className="flex flex-col gap-[0.4rem]">
+            <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Quantity Purchased</label>
+            <input
+              type="number"
+              step="0.01"
+              value={editBatchForm.quantityPurchased}
+              onChange={(e) => setEditBatchForm((prev) => ({ ...prev, quantityPurchased: e.target.value }))}
+              required
+              disabled={editBatchSubmitting}
+              className={inputClass}
+            />
+          </div>
+          <div className="flex flex-col gap-[0.4rem]">
+            <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Unit Price (৳)</label>
+            <input
+              type="number"
+              step="0.01"
+              value={editBatchForm.unitPrice}
+              onChange={(e) => setEditBatchForm((prev) => ({ ...prev, unitPrice: e.target.value }))}
+              required
+              disabled={editBatchSubmitting}
+              className={inputClass}
+            />
+          </div>
+          <div className="flex flex-col gap-[0.4rem]">
+            <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Purchase Date</label>
+            <input
+              type="date"
+              value={editBatchForm.purchaseDate}
+              onChange={(e) => setEditBatchForm((prev) => ({ ...prev, purchaseDate: e.target.value }))}
+              disabled={editBatchSubmitting}
+              className={inputClass}
+            />
+          </div>
+
+          {editBatchError && <p className="text-[0.8rem] font-semibold text-[#ef4444]">{editBatchError}</p>}
+
+          <div className="flex justify-end gap-2 pt-2">
+            <button type="button" onClick={closeEditBatch} disabled={editBatchSubmitting} className={secondaryBtnClass}>
+              Cancel
+            </button>
+            <button type="submit" disabled={editBatchSubmitting} className={primaryBtnClass}>
+              <i className={`fa-solid ${editBatchSubmitting ? 'fa-spinner fa-spin' : 'fa-save'}`} />
+              {editBatchSubmitting ? 'Saving...' : 'Save Changes'}
+            </button>
+          </div>
+        </form>
+      </Modal>
     </div>
   );
 }

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import MultiSelect from '../components/MultiSelect';
+import Modal from '../components/Modal';
 import { getApiErrorMessage } from '../utils/apiError';
 import { formatQty } from '../utils/formatNumber';
 
@@ -183,6 +184,18 @@ export default function WoodProcessing() {
   const [stageSubmitting, setStageSubmitting] = useState(false);
   const [stageFormError, setStageFormError] = useState<string | null>(null);
   const [deletingStageId, setDeletingStageId] = useState<number | null>(null);
+
+  const [editingEntry, setEditingEntry] = useState<WoodProcessingEntry | null>(null);
+  const [editEntryForm, setEditEntryForm] = useState<EntryFormState>(emptyEntryForm);
+  const [editEntrySubmitting, setEditEntrySubmitting] = useState(false);
+  const [editEntryError, setEditEntryError] = useState<string | null>(null);
+  const [deletingEntryId, setDeletingEntryId] = useState<number | null>(null);
+
+  const [editingBatch, setEditingBatch] = useState<WoodStockBatchRow | null>(null);
+  const [editBatchForm, setEditBatchForm] = useState({ quantity: '', unitPrice: '', batchDate: '' });
+  const [editBatchSubmitting, setEditBatchSubmitting] = useState(false);
+  const [editBatchError, setEditBatchError] = useState<string | null>(null);
+  const [deletingBatchId, setDeletingBatchId] = useState<number | null>(null);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -425,6 +438,157 @@ export default function WoodProcessing() {
     }
   };
 
+  /* ────────── Processing Entry edit/delete ────────── */
+  const openEditEntry = (entry: WoodProcessingEntry) => {
+    setEditingEntry(entry);
+    setEditEntryForm({
+      stageId: String(entry.stage?.id ?? ''),
+      employeeIds: entry.employees?.map((e) => e.id) ?? [],
+      consumedQuantity: String(entry.consumedQuantity),
+      wasteQuantity: entry.wasteQuantity ? String(entry.wasteQuantity) : '',
+      wasteTypeId: '',
+      entryDate: entry.entryDate || today(),
+    });
+    setEditEntryError(null);
+  };
+
+  const closeEditEntry = () => {
+    setEditingEntry(null);
+    setEditEntryError(null);
+  };
+
+  const editSelectedStage = stages.find((s) => String(s.id) === editEntryForm.stageId);
+  const editConsumedNum = Number(editEntryForm.consumedQuantity) || 0;
+  const editWasteNum = Number(editEntryForm.wasteQuantity) || 0;
+  const editDerivedOutput = editConsumedNum - editWasteNum;
+  const editNeedsWasteType =
+    editWasteNum > 0 && !editSelectedStage?.defaultWasteTypeId && !editEntryForm.wasteTypeId;
+
+  const handleEditEntrySubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!editingEntry) return;
+    setEditEntryError(null);
+
+    if (!editEntryForm.stageId) {
+      setEditEntryError('Select a processing stage.');
+      return;
+    }
+    if (editEntryForm.employeeIds.length === 0) {
+      setEditEntryError('Select at least one artisan.');
+      return;
+    }
+    if (!editConsumedNum || editConsumedNum <= 0) {
+      setEditEntryError('Enter how much was taken from stock (weight before processing).');
+      return;
+    }
+    if (editWasteNum >= editConsumedNum) {
+      setEditEntryError('Waste must be less than the quantity taken -- there has to be some good output.');
+      return;
+    }
+    if (editNeedsWasteType) {
+      setEditEntryError('This stage has no default waste type -- pick one for the waste produced.');
+      return;
+    }
+
+    setEditEntrySubmitting(true);
+    try {
+      await axios.patch(`${API_URL}/wood-processing-entries/${editingEntry.id}`, {
+        stageId: Number(editEntryForm.stageId),
+        employeeIds: editEntryForm.employeeIds,
+        consumedQuantity: editConsumedNum,
+        wasteQuantity: editWasteNum,
+        wasteTypeId: editEntryForm.wasteTypeId ? Number(editEntryForm.wasteTypeId) : undefined,
+        entryDate: editEntryForm.entryDate,
+      });
+      closeEditEntry();
+      loadAll();
+    } catch (err) {
+      setEditEntryError(getApiErrorMessage(err, 'Could not reach the server. Check the console.'));
+      console.error('Failed to update wood processing entry', err);
+    } finally {
+      setEditEntrySubmitting(false);
+    }
+  };
+
+  const handleEntryDelete = async (entry: WoodProcessingEntry) => {
+    if (
+      !window.confirm(
+        `Delete this "${entry.stageName}" entry? This reverses the stock and payout changes it made.`,
+      )
+    ) {
+      return;
+    }
+    setDeletingEntryId(entry.id);
+    try {
+      await axios.delete(`${API_URL}/wood-processing-entries/${entry.id}`);
+      loadAll();
+    } catch (err) {
+      window.alert(getApiErrorMessage(err, 'Failed to delete entry. Check the console.'));
+      console.error('Failed to delete wood processing entry', err);
+    } finally {
+      setDeletingEntryId(null);
+    }
+  };
+
+  /* ────────── Purchased batch edit/delete (Batch History) ────────── */
+  const openEditBatch = (batch: WoodStockBatchRow) => {
+    setEditingBatch(batch);
+    setEditBatchForm({
+      quantity: String(batch.quantity),
+      unitPrice: String(batch.unitPrice),
+      batchDate: batch.batchDate ?? '',
+    });
+    setEditBatchError(null);
+  };
+
+  const closeEditBatch = () => {
+    setEditingBatch(null);
+    setEditBatchError(null);
+  };
+
+  const handleEditBatchSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!editingBatch) return;
+    setEditBatchError(null);
+
+    const quantity = Number(editBatchForm.quantity);
+    const unitPrice = Number(editBatchForm.unitPrice);
+    if (!quantity || quantity <= 0 || isNaN(unitPrice) || unitPrice < 0) {
+      setEditBatchError('Enter a valid quantity and unit price.');
+      return;
+    }
+
+    setEditBatchSubmitting(true);
+    try {
+      await axios.patch(`${API_URL}/wood-stock/batches/${editingBatch.id}`, {
+        quantity,
+        unitPrice,
+        batchDate: editBatchForm.batchDate || undefined,
+      });
+      closeEditBatch();
+      loadAll();
+    } catch (err) {
+      setEditBatchError(getApiErrorMessage(err, 'Could not reach the server. Check the console.'));
+      console.error('Failed to update wood stock batch', err);
+    } finally {
+      setEditBatchSubmitting(false);
+    }
+  };
+
+  const handleBatchDelete = async (batch: WoodStockBatchRow) => {
+    if (!window.confirm('Delete this purchase batch? This cannot be undone.')) return;
+    setDeletingBatchId(batch.id);
+    try {
+      await axios.delete(`${API_URL}/wood-stock/batches/${batch.id}`);
+      loadAll();
+    } catch (err) {
+      window.alert(getApiErrorMessage(err, 'Failed to delete batch. Check the console.'));
+      console.error('Failed to delete wood stock batch', err);
+    } finally {
+      setDeletingBatchId(null);
+    }
+  };
+
   return (
     <div className="flex flex-col gap-6">
       <div>
@@ -493,6 +657,7 @@ export default function WoodProcessing() {
                   <th className="py-2 pr-4 font-bold text-right">Remaining</th>
                   <th className="py-2 pr-4 font-bold">Source</th>
                   <th className="py-2 pr-4 font-bold">Date</th>
+                  <th className="py-2 pr-4 font-bold text-right">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -519,6 +684,31 @@ export default function WoodProcessing() {
                       {b.sourceEntryId ? `Processing entry #${b.sourceEntryId}` : 'Purchased'}
                     </td>
                     <td className="py-3 pr-4 text-[#545454]">{b.batchDate || '—'}</td>
+                    <td className="py-3 pr-4">
+                      {b.sourceEntryId ? (
+                        <p className="text-right text-[0.72rem] text-[#545454]">Edit via entry</p>
+                      ) : (
+                        <div className="flex justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={() => openEditBatch(b)}
+                            title="Edit purchase"
+                            className="w-8 h-8 inline-flex items-center justify-center rounded-lg border border-[#e8e8e8] text-[#545454] hover:bg-[#f7f7f7] cursor-pointer"
+                          >
+                            <i className="fa-solid fa-pen" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleBatchDelete(b)}
+                            disabled={deletingBatchId === b.id}
+                            title="Delete purchase"
+                            className="w-8 h-8 inline-flex items-center justify-center rounded-lg border border-[rgba(239,68,68,0.25)] text-[#ef4444] hover:bg-[rgba(239,68,68,0.08)] cursor-pointer disabled:opacity-40"
+                          >
+                            <i className={`fa-solid ${deletingBatchId === b.id ? 'fa-spinner fa-spin' : 'fa-trash'}`} />
+                          </button>
+                        </div>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -969,6 +1159,7 @@ export default function WoodProcessing() {
                   <th className="py-2 pr-4 font-bold text-right">Waste</th>
                   <th className="py-2 pr-4 font-bold text-right">Rate Used</th>
                   <th className="py-2 pr-4 font-bold">Date</th>
+                  <th className="py-2 pr-4 font-bold text-right">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -983,6 +1174,27 @@ export default function WoodProcessing() {
                     <td className="py-3 pr-4 text-[#545454] text-right">{formatQty(entry.wasteQuantity)}</td>
                     <td className="py-3 pr-4 text-[#545454] text-right">৳{entry.wageRateUsed.toFixed(2)}</td>
                     <td className="py-3 pr-4 text-[#545454]">{entry.entryDate || '—'}</td>
+                    <td className="py-3 pr-4">
+                      <div className="flex justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => openEditEntry(entry)}
+                          title="Edit entry"
+                          className="w-8 h-8 inline-flex items-center justify-center rounded-lg border border-[#e8e8e8] text-[#545454] hover:bg-[#f7f7f7] cursor-pointer"
+                        >
+                          <i className="fa-solid fa-pen" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleEntryDelete(entry)}
+                          disabled={deletingEntryId === entry.id}
+                          title="Delete entry"
+                          className="w-8 h-8 inline-flex items-center justify-center rounded-lg border border-[rgba(239,68,68,0.25)] text-[#ef4444] hover:bg-[rgba(239,68,68,0.08)] cursor-pointer disabled:opacity-40"
+                        >
+                          <i className={`fa-solid ${deletingEntryId === entry.id ? 'fa-spinner fa-spin' : 'fa-trash'}`} />
+                        </button>
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -990,6 +1202,181 @@ export default function WoodProcessing() {
           </div>
         )}
       </div>
+
+      <Modal open={!!editingEntry} onClose={closeEditEntry} title="Edit Processing Entry">
+        <form onSubmit={handleEditEntrySubmit} className="flex flex-col gap-4">
+          <div className="flex flex-col gap-[0.4rem]">
+            <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Stage</label>
+            <select
+              value={editEntryForm.stageId}
+              onChange={(e) => setEditEntryForm((prev) => ({ ...prev, stageId: e.target.value, wasteTypeId: '' }))}
+              required
+              disabled={editEntrySubmitting}
+              className={inputClass}
+            >
+              <option value="">Select a stage...</option>
+              {stages.map((stage) => (
+                <option key={stage.id} value={stage.id}>
+                  {stage.name} ({stage.inputType?.name} → {stage.outputType?.name})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex flex-col gap-[0.4rem]">
+            <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Artisan(s)</label>
+            <MultiSelect
+              options={activeEmployees.map((employee) => ({ id: employee.id, label: employee.name }))}
+              selectedIds={editEntryForm.employeeIds}
+              onChange={(ids) => setEditEntryForm((prev) => ({ ...prev, employeeIds: ids }))}
+              placeholder="Select artisan(s)..."
+              disabled={editEntrySubmitting}
+            />
+          </div>
+
+          <div className="flex flex-col gap-[0.4rem]">
+            <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Quantity Taken (before processing)</label>
+            <input
+              type="number"
+              step="any"
+              value={editEntryForm.consumedQuantity}
+              onChange={(e) => setEditEntryForm((prev) => ({ ...prev, consumedQuantity: e.target.value }))}
+              required
+              disabled={editEntrySubmitting}
+              className={inputClass}
+            />
+          </div>
+
+          <div className="flex flex-col gap-[0.4rem]">
+            <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Waste Qty</label>
+            <input
+              type="number"
+              step="any"
+              value={editEntryForm.wasteQuantity}
+              onChange={(e) => setEditEntryForm((prev) => ({ ...prev, wasteQuantity: e.target.value }))}
+              disabled={editEntrySubmitting}
+              className={inputClass}
+            />
+          </div>
+
+          <div className="flex flex-col gap-[0.4rem]">
+            <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Output (auto)</label>
+            <div className={`${inputClass} bg-[#f8fafc] text-[#545454] flex items-center`}>
+              {editConsumedNum > 0 ? formatQty(Math.max(editDerivedOutput, 0)) : '—'}
+            </div>
+          </div>
+
+          {editWasteNum > 0 && (
+            <div className="flex flex-col gap-[0.4rem]">
+              <label className="text-[0.8rem] font-bold text-[#1E1E1E]">
+                Waste Type {editSelectedStage?.defaultWasteTypeId ? '(override)' : ''}
+              </label>
+              <select
+                value={editEntryForm.wasteTypeId}
+                onChange={(e) => setEditEntryForm((prev) => ({ ...prev, wasteTypeId: e.target.value }))}
+                disabled={editEntrySubmitting}
+                className={inputClass}
+              >
+                <option value="">
+                  {editSelectedStage?.defaultWasteType?.name
+                    ? `Default: ${editSelectedStage.defaultWasteType.name}`
+                    : 'Select waste type'}
+                </option>
+                {wasteTypes.map((wt) => (
+                  <option key={wt.id} value={wt.id}>
+                    {wt.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          <div className="flex flex-col gap-[0.4rem]">
+            <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Date</label>
+            <input
+              type="date"
+              value={editEntryForm.entryDate}
+              onChange={(e) => setEditEntryForm((prev) => ({ ...prev, entryDate: e.target.value }))}
+              disabled={editEntrySubmitting}
+              className={inputClass}
+            />
+          </div>
+
+          {editEntryError && <p className="text-[0.8rem] font-semibold text-[#ef4444]">{editEntryError}</p>}
+
+          <div className="flex justify-end gap-2 pt-2">
+            <button
+              type="button"
+              onClick={closeEditEntry}
+              disabled={editEntrySubmitting}
+              className="h-10 px-4 rounded-lg border border-[#e8e8e8] text-[#545454] font-bold text-[0.875rem] hover:bg-[#f8fafc] transition-colors duration-200 disabled:opacity-60 cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button type="submit" disabled={editEntrySubmitting} className={primaryBtnClass}>
+              <i className={`fa-solid ${editEntrySubmitting ? 'fa-spinner fa-spin' : 'fa-save'}`} />
+              {editEntrySubmitting ? 'Saving...' : 'Save Changes'}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      <Modal open={!!editingBatch} onClose={closeEditBatch} title="Edit Purchase Batch">
+        <form onSubmit={handleEditBatchSubmit} className="flex flex-col gap-4">
+          <p className="text-[0.8rem] text-[#545454]">{editingBatch?.woodTypeName}</p>
+          <div className="flex flex-col gap-[0.4rem]">
+            <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Quantity</label>
+            <input
+              type="number"
+              step="0.01"
+              value={editBatchForm.quantity}
+              onChange={(e) => setEditBatchForm((prev) => ({ ...prev, quantity: e.target.value }))}
+              required
+              disabled={editBatchSubmitting}
+              className={inputClass}
+            />
+          </div>
+          <div className="flex flex-col gap-[0.4rem]">
+            <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Unit Price (৳)</label>
+            <input
+              type="number"
+              step="0.01"
+              value={editBatchForm.unitPrice}
+              onChange={(e) => setEditBatchForm((prev) => ({ ...prev, unitPrice: e.target.value }))}
+              required
+              disabled={editBatchSubmitting}
+              className={inputClass}
+            />
+          </div>
+          <div className="flex flex-col gap-[0.4rem]">
+            <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Date</label>
+            <input
+              type="date"
+              value={editBatchForm.batchDate}
+              onChange={(e) => setEditBatchForm((prev) => ({ ...prev, batchDate: e.target.value }))}
+              disabled={editBatchSubmitting}
+              className={inputClass}
+            />
+          </div>
+
+          {editBatchError && <p className="text-[0.8rem] font-semibold text-[#ef4444]">{editBatchError}</p>}
+
+          <div className="flex justify-end gap-2 pt-2">
+            <button
+              type="button"
+              onClick={closeEditBatch}
+              disabled={editBatchSubmitting}
+              className="h-10 px-4 rounded-lg border border-[#e8e8e8] text-[#545454] font-bold text-[0.875rem] hover:bg-[#f8fafc] transition-colors duration-200 disabled:opacity-60 cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button type="submit" disabled={editBatchSubmitting} className={primaryBtnClass}>
+              <i className={`fa-solid ${editBatchSubmitting ? 'fa-spinner fa-spin' : 'fa-save'}`} />
+              {editBatchSubmitting ? 'Saving...' : 'Save Changes'}
+            </button>
+          </div>
+        </form>
+      </Modal>
     </div>
   );
 }

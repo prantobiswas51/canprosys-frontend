@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import axios from 'axios';
 import Modal from '../components/Modal';
 import { getApiErrorMessage } from '../utils/apiError';
@@ -58,6 +58,26 @@ interface RecipeFormState {
   materialUsages: MaterialUsageFormRow[];
 }
 
+// Export/import shape -- keyed by task/material NAME rather than id, so a
+// file exported from one environment (or before a reseed) still resolves
+// correctly against whatever ids the current database happens to have.
+interface ImportedTaskRate {
+  taskName: string;
+  rate: number;
+}
+
+interface ImportedMaterialUsage {
+  rawMaterialName: string;
+  quantity: number;
+}
+
+interface ImportedRecipe {
+  product: string;
+  sku: string;
+  taskRates?: ImportedTaskRate[];
+  materialUsages?: ImportedMaterialUsage[];
+}
+
 const emptyForm: RecipeFormState = {
   product: '',
   sku: '',
@@ -93,6 +113,10 @@ export default function Recipes() {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterTaskId, setFilterTaskId] = useState('');
   const [filterRawMaterialId, setFilterRawMaterialId] = useState('');
+
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importSummary, setImportSummary] = useState<string | null>(null);
 
   const fetchRecipes = useCallback(async () => {
     setLoading(true);
@@ -293,6 +317,119 @@ export default function Recipes() {
     return true;
   });
 
+  // Exports keyed by name, not id -- see ImportedRecipe comment above.
+  const handleExport = () => {
+    const exportData: ImportedRecipe[] = recipes.map((r) => ({
+      product: r.product,
+      sku: r.sku,
+      taskRates: r.taskRates.map((tr) => ({ taskName: tr.taskName, rate: tr.rate })),
+      materialUsages: r.materialUsages.map((mu) => ({
+        rawMaterialName: mu.rawMaterialName,
+        quantity: mu.quantity,
+      })),
+    }));
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `recipes-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const triggerImport = () => {
+    setImportSummary(null);
+    fileInputRef.current?.click();
+  };
+
+  // Row-by-row: matches each task/material by name against what's currently
+  // in the database, and matches each recipe by SKU against what already
+  // exists -- update in place if the SKU is already a recipe here, create
+  // otherwise. That makes the same file safe to re-import (e.g. after
+  // fixing a typo) without creating duplicates.
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+
+    setImporting(true);
+    setImportSummary(null);
+
+    let rows: ImportedRecipe[];
+    try {
+      const text = await file.text();
+      const json = JSON.parse(text);
+      rows = Array.isArray(json) ? json : [json];
+    } catch {
+      setImportSummary("Could not read that file -- make sure it's a valid recipe export (.json).");
+      setImporting(false);
+      return;
+    }
+
+    let created = 0;
+    let updated = 0;
+    const errors: string[] = [];
+    // Local working copy so multiple rows in the same file can target the
+    // same SKU (a later row updates what an earlier row in this same
+    // import just created) without a server round-trip in between.
+    let knownRecipes = [...recipes];
+
+    for (const row of rows) {
+      const label = row.sku || row.product || 'row';
+      try {
+        if (!row.product?.trim() || !row.sku?.trim()) {
+          throw new Error('missing product or sku');
+        }
+
+        const taskRates = (row.taskRates ?? []).map((tr) => {
+          const task = tasks.find(
+            (t) => t.name.trim().toLowerCase() === tr.taskName?.trim().toLowerCase(),
+          );
+          if (!task) throw new Error(`unknown task "${tr.taskName}"`);
+          return { taskId: task.id, rate: Number(tr.rate) };
+        });
+
+        const materialUsages = (row.materialUsages ?? []).map((mu) => {
+          const material = rawMaterials.find(
+            (m) => m.name.trim().toLowerCase() === mu.rawMaterialName?.trim().toLowerCase(),
+          );
+          if (!material) throw new Error(`unknown raw material "${mu.rawMaterialName}"`);
+          return { rawMaterialId: material.id, quantity: Number(mu.quantity) };
+        });
+
+        const payload = { product: row.product.trim(), sku: row.sku.trim(), taskRates, materialUsages };
+        const existing = knownRecipes.find(
+          (r) => r.sku.trim().toLowerCase() === row.sku.trim().toLowerCase(),
+        );
+
+        if (existing) {
+          const res = await axios.patch<Recipe>(`${API_URL}/recipes/${existing.id}`, payload);
+          knownRecipes = knownRecipes.map((r) => (r.id === existing.id ? res.data : r));
+          updated++;
+        } else {
+          const res = await axios.post<Recipe>(`${API_URL}/recipes`, payload);
+          knownRecipes = [...knownRecipes, res.data];
+          created++;
+        }
+      } catch (err) {
+        const message =
+          err instanceof Error && !axios.isAxiosError(err)
+            ? err.message
+            : getApiErrorMessage(err, 'failed');
+        errors.push(`${label}: ${message}`);
+      }
+    }
+
+    setImportSummary(
+      `Imported: ${created} created, ${updated} updated` +
+        (errors.length > 0 ? `, ${errors.length} failed -- ${errors.join('; ')}` : '.'),
+    );
+    setImporting(false);
+    fetchRecipes();
+  };
+
   const handleDelete = async (id: number) => {
     if (!window.confirm('Delete this recipe? This cannot be undone.')) return;
     setDeletingId(id);
@@ -314,15 +451,50 @@ export default function Recipes() {
           <h2 className="text-[1.4rem] font-extrabold text-[#1E1E1E] mb-2">Recipes</h2>
           <p className="text-[0.9rem] text-[#545454]">Material recipes and production formulas.</p>
         </div>
-        <button
-          type="button"
-          onClick={openCreateModal}
-          className="h-10 px-4 flex items-center gap-2 rounded-lg bg-[#e21e53] text-white font-bold text-[0.875rem] transition-all duration-200 hover:bg-[#c01745] hover:-translate-y-px hover:shadow-[0_6px_14px_rgba(226,30,83,0.25)] cursor-pointer"
-        >
-          <i className="fa-solid fa-flask" />
-          Add Recipe
-        </button>
+        <div className="flex items-center gap-2">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".json,application/json"
+            onChange={handleImportFile}
+            className="hidden"
+          />
+          <button
+            type="button"
+            onClick={triggerImport}
+            disabled={importing}
+            title="Import recipes from a .json file"
+            className="h-10 px-4 flex items-center gap-2 rounded-lg border border-[#e8e8e8] text-[#545454] font-bold text-[0.875rem] hover:bg-[#f8fafc] hover:text-[#1E1E1E] transition-colors duration-200 disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
+          >
+            <i className={`fa-solid ${importing ? 'fa-spinner fa-spin' : 'fa-file-import'}`} />
+            {importing ? 'Importing...' : 'Import'}
+          </button>
+          <button
+            type="button"
+            onClick={handleExport}
+            disabled={recipes.length === 0}
+            title="Export all recipes as .json"
+            className="h-10 px-4 flex items-center gap-2 rounded-lg border border-[#e8e8e8] text-[#545454] font-bold text-[0.875rem] hover:bg-[#f8fafc] hover:text-[#1E1E1E] transition-colors duration-200 disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
+          >
+            <i className="fa-solid fa-file-export" />
+            Export
+          </button>
+          <button
+            type="button"
+            onClick={openCreateModal}
+            className="h-10 px-4 flex items-center gap-2 rounded-lg bg-[#e21e53] text-white font-bold text-[0.875rem] transition-all duration-200 hover:bg-[#c01745] hover:-translate-y-px hover:shadow-[0_6px_14px_rgba(226,30,83,0.25)] cursor-pointer"
+          >
+            <i className="fa-solid fa-flask" />
+            Add Recipe
+          </button>
+        </div>
       </div>
+
+      {importSummary && (
+        <p className="mb-4 rounded-lg border border-[#e8e8e8] bg-[#f8fafc] px-4 py-3 text-[0.8rem] font-semibold text-[#1E1E1E]">
+          {importSummary}
+        </p>
+      )}
 
       {!loading && !listError && recipes.length > 0 && (
         <div className={`${cardClass} mb-4 flex flex-wrap gap-3 items-end`}>
@@ -428,7 +600,7 @@ export default function Recipes() {
 
                 <p className="text-[0.72rem] font-bold uppercase tracking-[0.05em] text-[#545454] mt-4 mb-2">
                   Artisan Wages (Payout — ৳{' '}
-                  {recipe.taskRates.reduce((sum, tr) => sum + tr.rate, 0)})
+                  {recipe.taskRates.reduce((sum, tr) => sum + tr.rate, 0).toFixed(2)})
                 </p>
                 {recipe.taskRates.length === 0 ? (
                   <p className="text-[0.8rem] font-medium text-[#545454]">No tasks assigned yet.</p>

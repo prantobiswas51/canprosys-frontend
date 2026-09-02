@@ -90,6 +90,10 @@ export default function Recipes() {
 
   const [deletingId, setDeletingId] = useState<number | null>(null);
 
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterTaskId, setFilterTaskId] = useState('');
+  const [filterRawMaterialId, setFilterRawMaterialId] = useState('');
+
   const fetchRecipes = useCallback(async () => {
     setLoading(true);
     setListError(null);
@@ -264,6 +268,31 @@ export default function Recipes() {
     }
   };
 
+  // Client-side -- the recipe catalog is small enough that fetching once and
+  // filtering here is simpler than a backend search endpoint, and keeps the
+  // three filters (text, task, material) instantly combinable.
+  const filtersActive = searchQuery.trim() !== '' || filterTaskId !== '' || filterRawMaterialId !== '';
+
+  const clearFilters = () => {
+    setSearchQuery('');
+    setFilterTaskId('');
+    setFilterRawMaterialId('');
+  };
+
+  const filteredRecipes = recipes.filter((recipe) => {
+    const q = searchQuery.trim().toLowerCase();
+    if (q && !recipe.product.toLowerCase().includes(q) && !recipe.sku.toLowerCase().includes(q)) {
+      return false;
+    }
+    if (filterTaskId && !recipe.taskRates.some((tr) => String(tr.taskId) === filterTaskId)) {
+      return false;
+    }
+    if (filterRawMaterialId && !recipe.materialUsages.some((mu) => String(mu.rawMaterialId) === filterRawMaterialId)) {
+      return false;
+    }
+    return true;
+  });
+
   const handleDelete = async (id: number) => {
     if (!window.confirm('Delete this recipe? This cannot be undone.')) return;
     setDeletingId(id);
@@ -295,6 +324,56 @@ export default function Recipes() {
         </button>
       </div>
 
+      {!loading && !listError && recipes.length > 0 && (
+        <div className={`${cardClass} mb-4 flex flex-wrap gap-3 items-end`}>
+          <div className="flex flex-col gap-[0.4rem] flex-1 min-w-[200px]">
+            <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Search</label>
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search by product or SKU..."
+              className={inputClass}
+            />
+          </div>
+          <div className="flex flex-col gap-[0.4rem] w-full sm:w-[200px]">
+            <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Filter by Task</label>
+            <select value={filterTaskId} onChange={(e) => setFilterTaskId(e.target.value)} className={inputClass}>
+              <option value="">All tasks</option>
+              {tasks.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="flex flex-col gap-[0.4rem] w-full sm:w-[200px]">
+            <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Filter by Material</label>
+            <select
+              value={filterRawMaterialId}
+              onChange={(e) => setFilterRawMaterialId(e.target.value)}
+              className={inputClass}
+            >
+              <option value="">All materials</option>
+              {rawMaterials.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name} ({m.unit})
+                </option>
+              ))}
+            </select>
+          </div>
+          {filtersActive && (
+            <button
+              type="button"
+              onClick={clearFilters}
+              className="h-10 px-4 rounded-lg border border-[#e8e8e8] text-[#545454] font-bold text-[0.8rem] hover:bg-[#f8fafc] hover:text-[#1E1E1E] transition-colors duration-200 cursor-pointer"
+            >
+              Clear Filters
+            </button>
+          )}
+        </div>
+      )}
+
       {loading && <p className="text-[0.8rem] font-semibold text-[#545454]">Loading recipes...</p>}
 
       {!loading && listError && (
@@ -305,9 +384,18 @@ export default function Recipes() {
         <p className="text-[0.8rem] font-semibold text-[#545454]">No recipes yet. Add your first one.</p>
       )}
 
-      {!loading && !listError && recipes.length > 0 && (
+      {!loading && !listError && recipes.length > 0 && filteredRecipes.length === 0 && (
+        <p className="text-[0.8rem] font-semibold text-[#545454]">
+          No recipes match your filters.{' '}
+          <button type="button" onClick={clearFilters} className="font-bold text-[#e21e53] cursor-pointer underline">
+            Clear filters
+          </button>
+        </p>
+      )}
+
+      {!loading && !listError && filteredRecipes.length > 0 && (
         <div className="grid grid-cols-[repeat(auto-fit,minmax(280px,1fr))] gap-4">
-          {recipes.map((recipe) => (
+          {filteredRecipes.map((recipe) => (
             <div key={recipe.id} className={`${cardClass} flex flex-col justify-between`}>
               <div>
                 <div className="flex items-center justify-between border-b border-[#e8e8e8] pb-3 mb-3">
@@ -339,7 +427,8 @@ export default function Recipes() {
                 )}
 
                 <p className="text-[0.72rem] font-bold uppercase tracking-[0.05em] text-[#545454] mt-4 mb-2">
-                  Artisan Wages (Payout — ৳)
+                  Artisan Wages (Payout — ৳{' '}
+                  {recipe.taskRates.reduce((sum, tr) => sum + tr.rate, 0)})
                 </p>
                 {recipe.taskRates.length === 0 ? (
                   <p className="text-[0.8rem] font-medium text-[#545454]">No tasks assigned yet.</p>

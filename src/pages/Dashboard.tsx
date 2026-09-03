@@ -32,6 +32,7 @@ interface RawMaterialStockRow {
   rawMaterialName: string;
   unit: string;
   quantityRemaining: number;
+  averageUnitPrice: number;
   stockValue: number;
 }
 
@@ -40,7 +41,17 @@ interface WoodStockRow {
   woodTypeName: string;
   unit: string;
   quantityRemaining: number;
+  averageUnitPrice: number;
   stockValue: number;
+}
+
+// Only the fields needed to tell "raw wood, never processed" apart from
+// "output of some stage" (mid-process) and, among those, which one is the
+// final stage that mirrors into the general RawMaterial ledger.
+interface WoodStageOption {
+  id: number;
+  outputTypeId: number;
+  mirrorToRawMaterialId?: number;
 }
 
 interface ProductRow {
@@ -66,8 +77,13 @@ interface StockItem {
   name: string;
   unit: string;
   quantityRemaining: number;
+  averageUnitPrice: number;
   stockValue: number;
   category: 'material' | 'wood';
+  // 'raw' = purchased and untouched by any process. 'wip' = has gone
+  // through at least one wood-processing stage (including the final stage
+  // that feeds Packaging) but isn't a finished, packaged product yet.
+  bucket: 'raw' | 'wip';
 }
 
 function currentMonth() {
@@ -156,6 +172,54 @@ function StatCard({ label, value, icon, accent, prefix = '', suffix = '', decima
   );
 }
 
+function StockCard({ item }: { item: StockItem }) {
+  return (
+    <div
+      className={`flex flex-col gap-2 rounded-xl border p-3 ${
+        item.quantityRemaining <= 0
+          ? 'border-[rgba(239,68,68,0.3)] bg-[rgba(239,68,68,0.02)]'
+          : 'border-[#e8e8e8] bg-white'
+      }`}
+    >
+      <div className="flex items-center justify-between">
+        <div
+          className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[0.75rem] ${
+            item.category === 'wood'
+              ? 'bg-[rgba(168,85,247,0.08)] text-[#a855f7]'
+              : 'bg-[rgba(59,130,246,0.08)] text-[#3b82f6]'
+          }`}
+        >
+          <i className={`fa-solid ${item.category === 'wood' ? 'fa-tree' : 'fa-box'}`} />
+        </div>
+        <span
+          className={`shrink-0 rounded-full px-[0.4rem] py-[0.05rem] text-[0.6rem] font-bold uppercase tracking-[0.03em] ${
+            item.bucket === 'wip'
+              ? 'bg-[rgba(245,158,11,0.12)] text-[#f59e0b]'
+              : 'bg-[rgba(59,130,246,0.1)] text-[#3b82f6]'
+          }`}
+        >
+          {item.bucket === 'wip' ? 'WIP' : 'Raw'}
+        </span>
+      </div>
+      <div className="min-w-0">
+        <p className="truncate text-[0.82rem] font-bold text-[#1E1E1E]" title={item.name}>
+          {item.name}
+        </p>
+        <p className="text-[0.7rem] text-[#545454]">
+          {formatQty(item.quantityRemaining)} {item.unit}
+        </p>
+        <p className="text-[0.68rem] text-[#8a8a8a]">
+          ৳{item.averageUnitPrice.toFixed(2)}/{item.unit}
+        </p>
+      </div>
+      <div className="mt-auto flex items-center justify-between pt-1">
+        <p className="text-[0.85rem] font-extrabold text-[#1E1E1E]">৳{item.stockValue.toFixed(0)}</p>
+        {item.quantityRemaining <= 0 && <span className="text-[0.6rem] font-bold text-[#ef4444]">Out</span>}
+      </div>
+    </div>
+  );
+}
+
 function SectionHeader({ icon, title, subtitle }: { icon: string; title: string; subtitle: string }) {
   return (
     <div className="flex items-center gap-3">
@@ -188,6 +252,7 @@ export default function Dashboard() {
   const [monthLoans, setMonthLoans] = useState<LoanRow[]>([]);
   const [materialStock, setMaterialStock] = useState<RawMaterialStockRow[]>([]);
   const [woodStock, setWoodStock] = useState<WoodStockRow[]>([]);
+  const [woodStages, setWoodStages] = useState<WoodStageOption[]>([]);
   const [products, setProducts] = useState<ProductRow[]>([]);
   const [wasteStock, setWasteStock] = useState<WasteStockRow[]>([]);
   const [monthMaintenanceCosts, setMonthMaintenanceCosts] = useState<MaintenanceCostRow[]>([]);
@@ -199,21 +264,24 @@ export default function Dashboard() {
       setLoading(true);
       setError(null);
       try {
-        const [empRes, payoutRes, loanRes, matRes, woodRes, productRes, wasteRes, maintenanceRes] = await Promise.all([
-          axios.get<EmployeeRow[]>(`${API_URL}/employees`),
-          axios.get<PayoutRow[]>(`${API_URL}/payouts`, { params: { month: currentMonth() } }),
-          axios.get<LoanRow[]>(`${API_URL}/loans`, { params: { from, to } }),
-          axios.get<RawMaterialStockRow[]>(`${API_URL}/material-batches/stock-summary`),
-          axios.get<WoodStockRow[]>(`${API_URL}/wood-stock/summary`),
-          axios.get<ProductRow[]>(`${API_URL}/products`),
-          axios.get<WasteStockRow[]>(`${API_URL}/waste-batches/stock`),
-          axios.get<MaintenanceCostRow[]>(`${API_URL}/maintenance-costs`, { params: { month: currentMonth() } }),
-        ]);
+        const [empRes, payoutRes, loanRes, matRes, woodRes, stagesRes, productRes, wasteRes, maintenanceRes] =
+          await Promise.all([
+            axios.get<EmployeeRow[]>(`${API_URL}/employees`),
+            axios.get<PayoutRow[]>(`${API_URL}/payouts`, { params: { month: currentMonth() } }),
+            axios.get<LoanRow[]>(`${API_URL}/loans`, { params: { from, to } }),
+            axios.get<RawMaterialStockRow[]>(`${API_URL}/material-batches/stock-summary`),
+            axios.get<WoodStockRow[]>(`${API_URL}/wood-stock/summary`),
+            axios.get<WoodStageOption[]>(`${API_URL}/wood-stages`),
+            axios.get<ProductRow[]>(`${API_URL}/products`),
+            axios.get<WasteStockRow[]>(`${API_URL}/waste-batches/stock`),
+            axios.get<MaintenanceCostRow[]>(`${API_URL}/maintenance-costs`, { params: { month: currentMonth() } }),
+          ]);
         setEmployees(empRes.data);
         setMonthPayouts(payoutRes.data);
         setMonthLoans(loanRes.data);
         setMaterialStock(matRes.data);
         setWoodStock(woodRes.data);
+        setWoodStages(stagesRes.data);
         setProducts(productRes.data);
         setWasteStock(wasteRes.data);
         setMonthMaintenanceCosts(maintenanceRes.data);
@@ -236,27 +304,63 @@ export default function Dashboard() {
   const monthLoansTotal = monthLoans.reduce((sum, l) => sum + (l.amount || 0), 0);
 
   // ── Inventory metrics ──
-  const stockItems: StockItem[] = [
-    ...materialStock.map((m) => ({
-      key: `material-${m.rawMaterialId}`,
-      name: m.rawMaterialName,
-      unit: m.unit,
-      quantityRemaining: m.quantityRemaining,
-      stockValue: m.stockValue,
-      category: 'material' as const,
-    })),
-    ...woodStock.map((w) => ({
-      key: `wood-${w.woodTypeId}`,
+  // A WoodType that's some stage's outputTypeId has been through at least
+  // one processing step -- it's mid-process (WIP), not raw stock, even
+  // before it reaches the final stage. Among those, the final stage's
+  // output also gets mirrored into a RawMaterial/MaterialBatch row (see
+  // WoodProcessingService) -- same physical stock, so its rawMaterialId is
+  // excluded from the raw-material side below to avoid counting it twice.
+  const stageOutputTypeIds = new Set(woodStages.map((s) => s.outputTypeId));
+  const mirroredRawMaterialIds = new Set(
+    woodStages
+      .filter((s) => s.mirrorToRawMaterialId != null)
+      .map((s) => s.mirrorToRawMaterialId as number),
+  );
+
+  const rawMaterialItems: StockItem[] = [
+    ...materialStock
+      .filter((m) => !mirroredRawMaterialIds.has(m.rawMaterialId))
+      .map((m) => ({
+        key: `material-${m.rawMaterialId}`,
+        name: m.rawMaterialName,
+        unit: m.unit,
+        quantityRemaining: m.quantityRemaining,
+        averageUnitPrice: m.averageUnitPrice,
+        stockValue: m.stockValue,
+        category: 'material' as const,
+        bucket: 'raw' as const,
+      })),
+    ...woodStock
+      .filter((w) => !stageOutputTypeIds.has(w.woodTypeId))
+      .map((w) => ({
+        key: `wood-${w.woodTypeId}`,
+        name: w.woodTypeName,
+        unit: w.unit,
+        quantityRemaining: w.quantityRemaining,
+        averageUnitPrice: w.averageUnitPrice,
+        stockValue: w.stockValue,
+        category: 'wood' as const,
+        bucket: 'raw' as const,
+      })),
+  ].sort((a, b) => b.stockValue - a.stockValue);
+
+  const wipItems: StockItem[] = woodStock
+    .filter((w) => stageOutputTypeIds.has(w.woodTypeId))
+    .map((w) => ({
+      key: `wip-${w.woodTypeId}`,
       name: w.woodTypeName,
       unit: w.unit,
       quantityRemaining: w.quantityRemaining,
+      averageUnitPrice: w.averageUnitPrice,
       stockValue: w.stockValue,
       category: 'wood' as const,
-    })),
-  ].sort((a, b) => b.stockValue - a.stockValue);
+      bucket: 'wip' as const,
+    }))
+    .sort((a, b) => b.stockValue - a.stockValue);
 
-  const rawStockValue = stockItems.reduce((sum, i) => sum + i.stockValue, 0);
-  const outOfStockMaterials = stockItems.filter((i) => i.quantityRemaining <= 0).length;
+  const rawStockValue = rawMaterialItems.reduce((sum, i) => sum + i.stockValue, 0);
+  const wipValue = wipItems.reduce((sum, i) => sum + i.stockValue, 0);
+  const outOfStockMaterials = rawMaterialItems.filter((i) => i.quantityRemaining <= 0).length;
   const finishedGoodsValue = products.reduce((sum, p) => sum + (p.stock || 0) * (p.costPrice || 0), 0);
   const outOfStockProducts = products.filter((p) => (p.stock || 0) <= 0).length;
   const sortedProducts = [...products].sort((a, b) => b.stock * b.costPrice - a.stock * a.costPrice);
@@ -392,69 +496,67 @@ export default function Dashboard() {
 
           {/* ══ INVENTORY SECTION ══ */}
           <div className="flex flex-col gap-4">
-            <SectionHeader icon="fa-warehouse" title="Inventory Overview" subtitle="Raw materials, wood stock & finished goods" />
+            <SectionHeader icon="fa-warehouse" title="Inventory Overview" subtitle="Raw materials, work-in-progress & finished goods" />
 
             <div className="grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-4">
               <StatCard label="Raw Material Value" value={rawStockValue} icon="fa-boxes-stacked" accent="blue" prefix="৳ " decimals={2} />
+              <StatCard label="Work-in-Progress Value" value={wipValue} icon="fa-industry" accent="amber" prefix="৳ " decimals={2} />
               <StatCard label="Finished Goods Value" value={finishedGoodsValue} icon="fa-sack-dollar" accent="green" prefix="৳ " decimals={2} />
               <StatCard label="Out of Stock (Materials)" value={outOfStockMaterials} icon="fa-triangle-exclamation" accent="rose" warn />
               <StatCard label="Out of Stock (Products)" value={outOfStockProducts} icon="fa-box-open" accent="rose" warn />
               <StatCard label="Waste Types In Stock" value={wasteTypesInStock} icon="fa-dumpster" accent="purple" />
             </div>
 
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-              <div className={cardClass}>
-                <div className="mb-4 flex items-center justify-between">
-                  <h3 className="text-[0.95rem] font-extrabold text-[#1E1E1E]">
-                    <i className="fa-solid fa-warehouse mr-2 text-[#e21e53]" />
-                    Raw Material & Wood Stock
-                  </h3>
-                  <Link to="/inventory" className="text-[0.78rem] font-bold text-[#e21e53] hover:underline">
-                    View All
-                  </Link>
-                </div>
-                {stockItems.length === 0 ? (
-                  <p className="text-[0.8rem] text-[#545454]">No stock recorded yet.</p>
-                ) : (
-                  <div className="flex max-h-[340px] flex-col gap-2 overflow-y-auto pr-1">
-                    {stockItems.map((item) => (
-                      <div
-                        key={item.key}
-                        className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-2 ${
-                          item.quantityRemaining <= 0
-                            ? 'border-[rgba(239,68,68,0.3)] bg-[rgba(239,68,68,0.02)]'
-                            : 'border-[#e8e8e8]'
-                        }`}
-                      >
-                        <div className="flex min-w-0 items-center gap-2">
-                          <div
-                            className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[0.75rem] ${
-                              item.category === 'wood'
-                                ? 'bg-[rgba(168,85,247,0.08)] text-[#a855f7]'
-                                : 'bg-[rgba(59,130,246,0.08)] text-[#3b82f6]'
-                            }`}
-                          >
-                            <i className={`fa-solid ${item.category === 'wood' ? 'fa-tree' : 'fa-box'}`} />
-                          </div>
-                          <div className="min-w-0">
-                            <p className="truncate text-[0.82rem] font-bold text-[#1E1E1E]">{item.name}</p>
-                            <p className="text-[0.7rem] text-[#545454]">
-                              {formatQty(item.quantityRemaining)} {item.unit}
-                            </p>
-                          </div>
-                        </div>
-                        <div className="shrink-0 text-right">
-                          <p className="text-[0.8rem] font-bold text-[#1E1E1E]">৳{item.stockValue.toFixed(0)}</p>
-                          {item.quantityRemaining <= 0 && (
-                            <span className="text-[0.65rem] font-bold text-[#ef4444]">Out of stock</span>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
+            {/* Raw Materials & WIP -- deliberately NOT inside a boxed cardClass
+                panel and NOT height-capped, so every item is visible at once
+                (a small scrollable box was hiding lower-value raw materials
+                under a long list of wood entries) -- full dashboard width,
+                split into its own two clearly-labeled groups instead. */}
+            <div className="flex flex-col gap-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-[0.95rem] font-extrabold text-[#1E1E1E]">
+                  <i className="fa-solid fa-warehouse mr-2 text-[#e21e53]" />
+                  Raw Materials & Work-in-Progress
+                </h3>
+                <Link to="/inventory" className="text-[0.78rem] font-bold text-[#e21e53] hover:underline">
+                  View All
+                </Link>
               </div>
 
+              <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+                <div className="flex flex-col gap-3">
+                  <h4 className="text-[0.72rem] font-extrabold uppercase tracking-[0.05em] text-[#545454]">
+                    Raw Materials ({rawMaterialItems.length})
+                  </h4>
+                  {rawMaterialItems.length === 0 ? (
+                    <p className="text-[0.8rem] text-[#545454]">No raw materials recorded yet.</p>
+                  ) : (
+                    <div className="grid grid-cols-[repeat(auto-fit,minmax(140px,1fr))] gap-3">
+                      {rawMaterialItems.map((item) => (
+                        <StockCard key={item.key} item={item} />
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex flex-col gap-3">
+                  <h4 className="text-[0.72rem] font-extrabold uppercase tracking-[0.05em] text-[#545454]">
+                    Work in Progress ({wipItems.length})
+                  </h4>
+                  {wipItems.length === 0 ? (
+                    <p className="text-[0.8rem] text-[#545454]">Nothing mid-process right now.</p>
+                  ) : (
+                    <div className="grid grid-cols-[repeat(auto-fit,minmax(140px,1fr))] gap-3">
+                      {wipItems.map((item) => (
+                        <StockCard key={item.key} item={item} />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4">
               <div className={cardClass}>
                 <div className="mb-4 flex items-center justify-between">
                   <h3 className="text-[0.95rem] font-extrabold text-[#1E1E1E]">

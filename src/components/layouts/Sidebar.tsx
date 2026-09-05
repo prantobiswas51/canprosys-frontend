@@ -90,7 +90,7 @@ const navGroups: NavGroup[] = [
 
       { icon: 'fa-truck', label: 'Transport Management', path: '/transport' },
       // { icon: 'fa-shield-halved', label: 'Approval Queue', path: '/approvals', badge: 3 },
-      // { icon: 'fa-gears', label: 'System Settings', path: '/settings' },
+      { icon: 'fa-gears', label: 'System Settings', path: '/settings' },
       // { icon: 'fa-book-open', label: 'User Manual', path: '/user-manual' },
     ],
   },

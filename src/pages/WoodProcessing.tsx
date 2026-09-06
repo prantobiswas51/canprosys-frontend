@@ -165,10 +165,6 @@ export default function WoodProcessing() {
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  const [entryForm, setEntryForm] = useState<EntryFormState>(emptyEntryForm);
-  const [entrySubmitting, setEntrySubmitting] = useState(false);
-  const [entryFormError, setEntryFormError] = useState<string | null>(null);
-
   const [purchaseForm, setPurchaseForm] = useState<PurchaseFormState>(emptyPurchaseForm);
   const [purchaseSubmitting, setPurchaseSubmitting] = useState(false);
   const [purchaseFormError, setPurchaseFormError] = useState<string | null>(null);
@@ -233,61 +229,6 @@ export default function WoodProcessing() {
   }, [loadAll]);
 
   const activeEmployees = employees.filter((e) => e.status === 'active');
-  const selectedStage = stages.find((s) => String(s.id) === entryForm.stageId);
-  const consumedQuantityNum = Number(entryForm.consumedQuantity) || 0;
-  const wasteQuantityNum = Number(entryForm.wasteQuantity) || 0;
-  const derivedOutputQuantity = consumedQuantityNum - wasteQuantityNum;
-  const needsWasteType =
-    wasteQuantityNum > 0 && !selectedStage?.defaultWasteTypeId && !entryForm.wasteTypeId;
-
-  const handleEntryChange = (field: keyof EntryFormState, value: string) => {
-    setEntryForm((prev) => ({ ...prev, [field]: value }));
-  };
-
-  const handleEntrySubmit = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    setEntryFormError(null);
-
-    if (!entryForm.stageId) {
-      setEntryFormError('Select a processing stage.');
-      return;
-    }
-    if (entryForm.employeeIds.length === 0) {
-      setEntryFormError('Select at least one artisan.');
-      return;
-    }
-    if (!consumedQuantityNum || consumedQuantityNum <= 0) {
-      setEntryFormError('Enter how much was taken from stock (weight before processing).');
-      return;
-    }
-    if (wasteQuantityNum >= consumedQuantityNum) {
-      setEntryFormError('Waste must be less than the quantity taken -- there has to be some good output.');
-      return;
-    }
-    if (needsWasteType) {
-      setEntryFormError('This stage has no default waste type -- pick one for the waste produced.');
-      return;
-    }
-
-    setEntrySubmitting(true);
-    try {
-      await axios.post(`${API_URL}/wood-processing-entries`, {
-        stageId: Number(entryForm.stageId),
-        employeeIds: entryForm.employeeIds,
-        consumedQuantity: consumedQuantityNum,
-        wasteQuantity: wasteQuantityNum,
-        wasteTypeId: entryForm.wasteTypeId ? Number(entryForm.wasteTypeId) : undefined,
-        entryDate: entryForm.entryDate,
-      });
-      setEntryForm({ ...emptyEntryForm, entryDate: entryForm.entryDate });
-      loadAll();
-    } catch (err) {
-      setEntryFormError(getApiErrorMessage(err, 'Could not reach the server. Check the console.'));
-      console.error('Failed to save wood processing entry', err);
-    } finally {
-      setEntrySubmitting(false);
-    }
-  };
 
   const handlePurchaseChange = (field: keyof PurchaseFormState, value: string) => {
     setPurchaseForm((prev) => ({ ...prev, [field]: value }));
@@ -788,119 +729,10 @@ export default function WoodProcessing() {
         {purchaseFormError && <p className="text-[0.8rem] font-semibold text-[#ef4444] mt-3">{purchaseFormError}</p>}
       </div>
 
-      {/* New processing entry */}
-      <div className={cardClass}>
-        <h3 className="text-[1.05rem] font-extrabold text-[#1E1E1E] border-b border-[#e8e8e8] pb-3 mb-4">
-          <i className="fa-solid fa-square-plus mr-2 text-[#e21e53]" />
-          New Processing Entry
-        </h3>
-        <form onSubmit={handleEntrySubmit} className="flex flex-wrap gap-4 md:items-end">
-          <div className="flex flex-col gap-[0.4rem] flex-1 min-w-[220px]">
-            <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Stage</label>
-            <select
-              value={entryForm.stageId}
-              onChange={(e) => handleEntryChange('stageId', e.target.value)}
-              required
-              disabled={loading || entrySubmitting}
-              className={inputClass}
-            >
-              <option value="">Select a stage...</option>
-              {stages.map((stage) => (
-                <option key={stage.id} value={stage.id}>
-                  {stage.name} ({stage.inputType?.name} → {stage.outputType?.name})
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="flex flex-col gap-[0.4rem] flex-1 min-w-[200px]">
-            <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Artisan(s)</label>
-            <MultiSelect
-              options={activeEmployees.map((employee) => ({ id: employee.id, label: employee.name }))}
-              selectedIds={entryForm.employeeIds}
-              onChange={(ids) => setEntryForm((prev) => ({ ...prev, employeeIds: ids }))}
-              placeholder="Select artisan(s)..."
-              disabled={loading || entrySubmitting}
-            />
-          </div>
-
-          <div className="flex flex-col gap-[0.4rem] w-full sm:w-[190px]">
-            <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Quantity Taken (before processing)</label>
-            <input
-              type="number"
-              step="any"
-              value={entryForm.consumedQuantity}
-              onChange={(e) => handleEntryChange('consumedQuantity', e.target.value)}
-              placeholder="e.g. 10"
-              required
-              disabled={entrySubmitting}
-              className={inputClass}
-            />
-          </div>
-
-          <div className="flex flex-col gap-[0.4rem] w-full sm:w-[150px]">
-            <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Waste Qty</label>
-            <input
-              type="number"
-              step="any"
-              value={entryForm.wasteQuantity}
-              onChange={(e) => handleEntryChange('wasteQuantity', e.target.value)}
-              placeholder="e.g. 1"
-              disabled={entrySubmitting}
-              className={inputClass}
-            />
-          </div>
-
-          <div className="flex flex-col gap-[0.4rem] w-full sm:w-[150px]">
-            <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Output (auto)</label>
-            <div className={`${inputClass} bg-[#f8fafc] text-[#545454] flex items-center`}>
-              {consumedQuantityNum > 0 ? formatQty(Math.max(derivedOutputQuantity, 0)) : '—'}
-            </div>
-          </div>
-
-          {wasteQuantityNum > 0 && (
-            <div className="flex flex-col gap-[0.4rem] w-full sm:w-[180px]">
-              <label className="text-[0.8rem] font-bold text-[#1E1E1E]">
-                Waste Type {selectedStage?.defaultWasteTypeId ? '(override)' : ''}
-              </label>
-              <select
-                value={entryForm.wasteTypeId}
-                onChange={(e) => handleEntryChange('wasteTypeId', e.target.value)}
-                disabled={entrySubmitting}
-                className={inputClass}
-              >
-                <option value="">
-                  {selectedStage?.defaultWasteType?.name
-                    ? `Default: ${selectedStage.defaultWasteType.name}`
-                    : 'Select waste type'}
-                </option>
-                {wasteTypes.map((wt) => (
-                  <option key={wt.id} value={wt.id}>
-                    {wt.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-
-          <div className="flex flex-col gap-[0.4rem] w-full sm:w-[160px]">
-            <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Date</label>
-            <input
-              type="date"
-              value={entryForm.entryDate}
-              onChange={(e) => handleEntryChange('entryDate', e.target.value)}
-              disabled={entrySubmitting}
-              className={inputClass}
-            />
-          </div>
-
-          <button type="submit" disabled={entrySubmitting || loading} className={primaryBtnClass}>
-            <i className={`fa-solid ${entrySubmitting ? 'fa-spinner fa-spin' : 'fa-save'}`} />
-            {entrySubmitting ? 'Saving...' : 'Add Entry'}
-          </button>
-        </form>
-        {entryFormError && <p className="mt-3 text-[0.8rem] font-semibold text-[#ef4444]">{entryFormError}</p>}
-      </div>
+      {/* New processing entry -- moved to the Daily Entry page (see
+          DailyEntry.tsx's "New Wood Processing Entry" section) so artisans
+          log all of their day's work, wood or otherwise, from one place.
+          Editing an existing entry (below) still happens here. */}
 
       {/* Add wood type + Add stage */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

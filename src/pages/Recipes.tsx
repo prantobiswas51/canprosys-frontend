@@ -21,6 +21,7 @@ interface RecipeTaskRate {
   taskId: number;
   taskName: string;
   rate: number;
+  sequence?: number | null;
 }
 
 interface RecipeMaterialUsage {
@@ -29,6 +30,12 @@ interface RecipeMaterialUsage {
   rawMaterialName: string;
   rawMaterialUnit: string;
   quantity: number;
+  // Which pipeline stage consumes this material -- null means "not yet
+  // assigned", which blocks Daily Entry from being logged for this recipe
+  // at all until every material row (and every task rate's sequence) is
+  // set. See DailyEntryService's migration guard.
+  taskId?: number | null;
+  taskName?: string | null;
 }
 
 interface Recipe {
@@ -44,11 +51,17 @@ interface Recipe {
 interface TaskRateFormRow {
   taskId: string;
   rate: string;
+  // Pipeline step number (1 = first, 2 = next, ...) -- optional, string
+  // while editing so an empty box isn't forced to "0".
+  sequence: string;
 }
 
 interface MaterialUsageFormRow {
   rawMaterialId: string;
   quantity: string;
+  // Which task consumes this material -- empty string means "not yet
+  // assigned" (see RecipeMaterialUsage.taskId on the backend).
+  taskId: string;
 }
 
 interface RecipeFormState {
@@ -64,11 +77,13 @@ interface RecipeFormState {
 interface ImportedTaskRate {
   taskName: string;
   rate: number;
+  sequence?: number | null;
 }
 
 interface ImportedMaterialUsage {
   rawMaterialName: string;
   quantity: number;
+  taskName?: string | null;
 }
 
 interface ImportedRecipe {
@@ -84,6 +99,17 @@ const emptyForm: RecipeFormState = {
   taskRates: [],
   materialUsages: [],
 };
+
+// Rows with no sequence set sort after every numbered one (instead of
+// first, which would be misleading), and ties/unset-vs-unset keep whatever
+// order they already had (Array.sort is stable).
+function sortBySequence<T extends { sequence?: number | null }>(rows: T[]): T[] {
+  return [...rows].sort((a, b) => {
+    const aSeq = a.sequence ?? Infinity;
+    const bSeq = b.sequence ?? Infinity;
+    return aSeq - bSeq;
+  });
+}
 
 const inputClass =
   'w-full bg-white border border-[#e8e8e8] text-[#1E1E1E] px-[0.85rem] py-[0.65rem] rounded-lg text-[0.875rem] font-medium transition-all duration-200 outline-none focus:border-[#e21e53] focus:shadow-[0_0_0_3px_rgba(16,185,129,0.15)] disabled:opacity-60 disabled:cursor-not-allowed';
@@ -172,13 +198,15 @@ export default function Recipes() {
     setForm({
       product: recipe.product,
       sku: recipe.sku,
-      taskRates: recipe.taskRates.map((tr) => ({
+      taskRates: sortBySequence(recipe.taskRates).map((tr) => ({
         taskId: String(tr.taskId),
         rate: String(tr.rate),
+        sequence: tr.sequence != null ? String(tr.sequence) : '',
       })),
       materialUsages: recipe.materialUsages.map((mu) => ({
         rawMaterialId: String(mu.rawMaterialId),
         quantity: String(mu.quantity),
+        taskId: mu.taskId != null ? String(mu.taskId) : '',
       })),
     });
     setFormError(null);
@@ -195,7 +223,7 @@ export default function Recipes() {
   };
 
   const addTaskRateRow = () => {
-    setForm((prev) => ({ ...prev, taskRates: [...prev.taskRates, { taskId: '', rate: '' }] }));
+    setForm((prev) => ({ ...prev, taskRates: [...prev.taskRates, { taskId: '', rate: '', sequence: '' }] }));
   };
 
   const removeTaskRateRow = (index: number) => {
@@ -222,7 +250,7 @@ export default function Recipes() {
   const addMaterialUsageRow = () => {
     setForm((prev) => ({
       ...prev,
-      materialUsages: [...prev.materialUsages, { rawMaterialId: '', quantity: '' }],
+      materialUsages: [...prev.materialUsages, { rawMaterialId: '', quantity: '', taskId: '' }],
     }));
   };
 
@@ -268,10 +296,12 @@ export default function Recipes() {
       taskRates: form.taskRates.map((row) => ({
         taskId: Number(row.taskId),
         rate: Number(row.rate),
+        sequence: row.sequence.trim() === '' ? undefined : Number(row.sequence),
       })),
       materialUsages: form.materialUsages.map((row) => ({
         rawMaterialId: Number(row.rawMaterialId),
         quantity: Number(row.quantity),
+        taskId: row.taskId.trim() === '' ? undefined : Number(row.taskId),
       })),
     };
 
@@ -322,10 +352,11 @@ export default function Recipes() {
     const exportData: ImportedRecipe[] = recipes.map((r) => ({
       product: r.product,
       sku: r.sku,
-      taskRates: r.taskRates.map((tr) => ({ taskName: tr.taskName, rate: tr.rate })),
+      taskRates: r.taskRates.map((tr) => ({ taskName: tr.taskName, rate: tr.rate, sequence: tr.sequence ?? undefined })),
       materialUsages: r.materialUsages.map((mu) => ({
         rawMaterialName: mu.rawMaterialName,
         quantity: mu.quantity,
+        taskName: mu.taskName ?? undefined,
       })),
     }));
     const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
@@ -388,7 +419,11 @@ export default function Recipes() {
             (t) => t.name.trim().toLowerCase() === tr.taskName?.trim().toLowerCase(),
           );
           if (!task) throw new Error(`unknown task "${tr.taskName}"`);
-          return { taskId: task.id, rate: Number(tr.rate) };
+          return {
+            taskId: task.id,
+            rate: Number(tr.rate),
+            sequence: tr.sequence != null ? Number(tr.sequence) : undefined,
+          };
         });
 
         const materialUsages = (row.materialUsages ?? []).map((mu) => {
@@ -396,7 +431,13 @@ export default function Recipes() {
             (m) => m.name.trim().toLowerCase() === mu.rawMaterialName?.trim().toLowerCase(),
           );
           if (!material) throw new Error(`unknown raw material "${mu.rawMaterialName}"`);
-          return { rawMaterialId: material.id, quantity: Number(mu.quantity) };
+          let taskId: number | undefined;
+          if (mu.taskName?.trim()) {
+            const task = tasks.find((t) => t.name.trim().toLowerCase() === mu.taskName!.trim().toLowerCase());
+            if (!task) throw new Error(`unknown task "${mu.taskName}"`);
+            taskId = task.id;
+          }
+          return { rawMaterialId: material.id, quantity: Number(mu.quantity), taskId };
         });
 
         const payload = { product: row.product.trim(), sku: row.sku.trim(), taskRates, materialUsages };
@@ -587,11 +628,18 @@ export default function Recipes() {
                     {recipe.materialUsages.map((mu) => (
                       <div
                         key={mu.id}
-                        className="flex items-center gap-[0.35rem] rounded-lg border border-[#e8e8e8] bg-[#f8fafc] px-2 py-2 text-[0.8rem] font-semibold text-[#1E1E1E]"
+                        className="flex flex-col gap-0.5 rounded-lg border border-[#e8e8e8] bg-[#f8fafc] px-2 py-2 text-[0.8rem] font-semibold text-[#1E1E1E]"
                       >
-                        <i className="fa-solid fa-cube w-4 text-center text-[#545454]" />
-                        <span>
+                        <span className="flex items-center gap-[0.35rem]">
+                          <i className="fa-solid fa-cube w-4 text-center text-[#545454]" />
                           {mu.rawMaterialName}: {mu.quantity} {mu.rawMaterialUnit}
+                        </span>
+                        <span
+                          className={`pl-5 text-[0.68rem] font-bold uppercase tracking-[0.03em] ${
+                            mu.taskName ? 'text-[#545454]' : 'text-[#ef4444]'
+                          }`}
+                        >
+                          {mu.taskName ? `at: ${mu.taskName}` : 'not assigned'}
                         </span>
                       </div>
                     ))}
@@ -606,14 +654,21 @@ export default function Recipes() {
                   <p className="text-[0.8rem] font-medium text-[#545454]">No tasks assigned yet.</p>
                 ) : (
                   <div className="flex flex-col gap-[0.35rem]">
-                    {recipe.taskRates.map((tr, i) => (
+                    {sortBySequence(recipe.taskRates).map((tr, i, sorted) => (
                       <div
                         key={tr.id}
-                        className={`flex justify-between text-[0.85rem] ${
-                          i < recipe.taskRates.length - 1 ? 'border-b border-dashed border-[#e8e8e8] pb-1' : ''
+                        className={`flex items-center justify-between text-[0.85rem] ${
+                          i < sorted.length - 1 ? 'border-b border-dashed border-[#e8e8e8] pb-1' : ''
                         }`}
                       >
-                        <span className="text-[#545454]">{tr.taskName}</span>
+                        <span className="flex items-center gap-1.5 text-[#545454]">
+                          {tr.sequence != null && (
+                            <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[rgba(226,30,83,0.1)] text-[0.62rem] font-bold text-[#e21e53]">
+                              {tr.sequence}
+                            </span>
+                          )}
+                          {tr.taskName}
+                        </span>
                         <span className="font-bold text-[#1E1E1E]">৳ {tr.rate}</span>
                       </div>
                     ))}
@@ -707,47 +762,67 @@ export default function Recipes() {
                   const excluded = usedRawMaterialIds(index);
                   const selectedUnit = rawMaterials.find((m) => String(m.id) === row.rawMaterialId)?.unit;
                   return (
-                    <div key={index} className="flex gap-2 items-center">
-                      <select
-                        value={row.rawMaterialId}
-                        onChange={(e) => updateMaterialUsageRow(index, 'rawMaterialId', e.target.value)}
-                        required
-                        disabled={submitting}
-                        className={`${inputClass.replace('w-full ', '')} flex-1 min-w-0`}
-                      >
-                        <option value="" disabled>
-                          Select material...
-                        </option>
-                        {rawMaterials
-                          .filter((m) => !excluded.has(String(m.id)) || String(m.id) === row.rawMaterialId)
-                          .map((m) => (
-                            <option key={m.id} value={m.id}>
-                              {m.name} ({m.unit})
+                    <div key={index} className="flex flex-col gap-1.5 rounded-lg border border-[#e8e8e8] p-2">
+                      <div className="flex gap-2 items-center">
+                        <select
+                          value={row.rawMaterialId}
+                          onChange={(e) => updateMaterialUsageRow(index, 'rawMaterialId', e.target.value)}
+                          required
+                          disabled={submitting}
+                          className={`${inputClass.replace('w-full ', '')} flex-1 min-w-0`}
+                        >
+                          <option value="" disabled>
+                            Select material...
+                          </option>
+                          {rawMaterials
+                            .filter((m) => !excluded.has(String(m.id)) || String(m.id) === row.rawMaterialId)
+                            .map((m) => (
+                              <option key={m.id} value={m.id}>
+                                {m.name} ({m.unit})
+                              </option>
+                            ))}
+                        </select>
+                        <span className="w-14 shrink-0 text-center text-[0.72rem] font-bold uppercase tracking-[0.03em] text-[#545454]">
+                          {selectedUnit ?? '—'}
+                        </span>
+                        <input
+                          type="number"
+                          step="any"
+                          value={row.quantity}
+                          onChange={(e) => updateMaterialUsageRow(index, 'quantity', e.target.value)}
+                          placeholder="e.g. 2.8"
+                          required
+                          disabled={submitting}
+                          className={`${inputClass.replace('w-full ', '')} w-[90px] shrink-0`}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => removeMaterialUsageRow(index)}
+                          disabled={submitting}
+                          className="h-9 w-9 shrink-0 flex items-center justify-center rounded-lg border border-[rgba(239,68,68,0.25)] text-[#ef4444] hover:bg-[rgba(239,68,68,0.08)] transition-colors duration-200 disabled:opacity-60 cursor-pointer"
+                          title="Remove"
+                        >
+                          <i className="fa-solid fa-trash" />
+                        </button>
+                      </div>
+                      <div className="flex items-center gap-2 pl-1">
+                        <span className="text-[0.68rem] font-bold uppercase tracking-[0.03em] text-[#545454] shrink-0">
+                          Consumed at:
+                        </span>
+                        <select
+                          value={row.taskId}
+                          onChange={(e) => updateMaterialUsageRow(index, 'taskId', e.target.value)}
+                          disabled={submitting}
+                          className={`${inputClass.replace('w-full ', '')} flex-1 min-w-0 !py-1 !text-[0.78rem]`}
+                        >
+                          <option value="">Not assigned yet</option>
+                          {tasks.map((t) => (
+                            <option key={t.id} value={t.id}>
+                              {t.name}
                             </option>
                           ))}
-                      </select>
-                      <span className="w-14 shrink-0 text-center text-[0.72rem] font-bold uppercase tracking-[0.03em] text-[#545454]">
-                        {selectedUnit ?? '—'}
-                      </span>
-                      <input
-                        type="number"
-                        step="any"
-                        value={row.quantity}
-                        onChange={(e) => updateMaterialUsageRow(index, 'quantity', e.target.value)}
-                        placeholder="e.g. 2.8"
-                        required
-                        disabled={submitting}
-                        className={`${inputClass.replace('w-full ', '')} w-[90px] shrink-0`}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => removeMaterialUsageRow(index)}
-                        disabled={submitting}
-                        className="h-9 w-9 shrink-0 flex items-center justify-center rounded-lg border border-[rgba(239,68,68,0.25)] text-[#ef4444] hover:bg-[rgba(239,68,68,0.08)] transition-colors duration-200 disabled:opacity-60 cursor-pointer"
-                        title="Remove"
-                      >
-                        <i className="fa-solid fa-trash" />
-                      </button>
+                        </select>
+                      </div>
                     </div>
                   );
                 })}
@@ -783,6 +858,17 @@ export default function Recipes() {
                   const excluded = usedTaskIds(index);
                   return (
                     <div key={index} className="flex gap-2 items-center">
+                      <input
+                        type="number"
+                        step="1"
+                        min="1"
+                        value={row.sequence}
+                        onChange={(e) => updateTaskRateRow(index, 'sequence', e.target.value)}
+                        placeholder="Step"
+                        title="Pipeline step number (optional) -- e.g. 1 = first step"
+                        disabled={submitting}
+                        className={`${inputClass.replace('w-full ', '')} w-[64px] shrink-0`}
+                      />
                       <select
                         value={row.taskId}
                         onChange={(e) => updateTaskRateRow(index, 'taskId', e.target.value)}

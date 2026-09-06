@@ -282,7 +282,14 @@ export default function Login() {
 
         {/* Footer */}
         <p className="text-center mt-8 text-[0.68rem] text-[#545454] opacity-70">
-          © 2026 CanProSys Ltd.
+          © 2026 CanProSys Ltd. ·{' '}
+          <a href="/privacy-policy" className="underline hover:text-[#1E1E1E]">
+            Privacy Policy
+          </a>{' '}
+          ·{' '}
+          <a href="/terms-and-conditions" className="underline hover:text-[#1E1E1E]">
+            Terms &amp; Conditions
+          </a>
         </p>
       </div>
     </>

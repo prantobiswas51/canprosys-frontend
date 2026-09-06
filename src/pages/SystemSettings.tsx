@@ -224,6 +224,7 @@ export default function SystemSettings() {
                   <th className="py-2 pr-3 font-bold">Status</th>
                   <th className="py-2 pr-3 font-bold">Size</th>
                   <th className="py-2 pr-3 font-bold">File</th>
+                  <th className="py-2 pr-3 font-bold"></th>
                 </tr>
               </thead>
               <tbody>
@@ -262,6 +263,20 @@ export default function SystemSettings() {
                         <span className="text-[#545454]" title={log.errorMessage}>
                           {log.fileName ?? '—'}
                         </span>
+                      )}
+                    </td>
+                    <td className="py-3 pr-3">
+                      {log.driveWebViewLink && (
+                        // Plain <a>, not axios -- the backend responds with
+                        // Content-Disposition: attachment, so the browser
+                        // downloads it directly without navigating away.
+                        <a
+                          href={`${API_URL}/settings/backups/${log.id}/download`}
+                          className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#e8e8e8] text-[#545454] hover:bg-[#f8fafc] hover:text-[#1E1E1E] transition-colors duration-200"
+                          title="Download this backup file"
+                        >
+                          <i className="fa-solid fa-download" />
+                        </a>
                       )}
                     </td>
                   </tr>

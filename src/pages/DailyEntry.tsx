@@ -37,11 +37,65 @@ interface DailyEntryRecord {
   createdAt: string;
 }
 
+// -- Wood Processing Entry (moved here from the Wood Processing page so
+// artisans can log either kind of daily work from one screen; stock,
+// purchases, and stage configuration still live on Wood Processing) --
+interface WoodTypeOption {
+  id: number;
+  name: string;
+  unit: string;
+}
+
+interface WasteTypeOption {
+  id: number;
+  name: string;
+}
+
+interface WoodStageOption {
+  id: number;
+  name: string;
+  inputTypeId: number;
+  inputType: WoodTypeOption;
+  outputTypeId: number;
+  outputType: WoodTypeOption;
+  wageRatePerUnit: number;
+  sequence: number;
+  mirrorToRawMaterialId?: number;
+  defaultWasteTypeId?: number;
+  defaultWasteType?: WasteTypeOption;
+  active: boolean;
+}
+
+interface WoodEntryFormState {
+  stageId: string;
+  employeeIds: number[];
+  consumedQuantity: string;
+  wasteQuantity: string;
+  wasteTypeId: string;
+  entryDate: string;
+}
+
+function today() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+const emptyWoodEntryForm: WoodEntryFormState = {
+  stageId: '',
+  employeeIds: [],
+  consumedQuantity: '',
+  wasteQuantity: '',
+  wasteTypeId: '',
+  entryDate: today(),
+};
+
 const inputClass =
   'w-full bg-white border border-[#e8e8e8] text-[#1E1E1E] px-[0.85rem] py-[0.65rem] rounded-lg text-[0.875rem] font-medium transition-all duration-200 outline-none focus:border-[#e21e53] focus:shadow-[0_0_0_3px_rgba(16,185,129,0.15)] disabled:opacity-60 disabled:cursor-not-allowed';
 
 const cardClass =
   'bg-white border border-[#e8e8e8] rounded-xl p-5 shadow-[0_4px_6px_-1px_rgba(0,0,0,0.08),0_2px_4px_-2px_rgba(0,0,0,0.08)]';
+
+const primaryBtnClass =
+  'h-10 px-4 flex items-center gap-2 rounded-lg bg-[#e21e53] text-white font-bold text-[0.875rem] transition-all duration-200 hover:bg-[#c01745] disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer';
 
 export default function DailyEntry() {
   const [tasks, setTasks] = useState<TaskOption[]>([]);
@@ -77,18 +131,30 @@ export default function DailyEntry() {
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
+  // -- Wood Processing Entry state (see interfaces above) --
+  const [woodStages, setWoodStages] = useState<WoodStageOption[]>([]);
+  const [wasteTypes, setWasteTypes] = useState<WasteTypeOption[]>([]);
+  const [woodEntryForm, setWoodEntryForm] = useState<WoodEntryFormState>(emptyWoodEntryForm);
+  const [woodEntrySubmitting, setWoodEntrySubmitting] = useState(false);
+  const [woodEntryFormError, setWoodEntryFormError] = useState<string | null>(null);
+  const [woodEntrySuccess, setWoodEntrySuccess] = useState(false);
+
   const loadOptions = useCallback(async () => {
     setLoadingOptions(true);
     setOptionsError(null);
     try {
-      const [tasksRes, employeesRes, recipesRes] = await Promise.all([
+      const [tasksRes, employeesRes, recipesRes, woodStagesRes, wasteTypesRes] = await Promise.all([
         axios.get<TaskOption[]>(`${API_URL}/tasks`),
         axios.get<EmployeeOption[]>(`${API_URL}/employees`),
         axios.get<RecipeOption[]>(`${API_URL}/recipes`),
+        axios.get<WoodStageOption[]>(`${API_URL}/wood-stages`),
+        axios.get<WasteTypeOption[]>(`${API_URL}/waste-types`),
       ]);
       setTasks(tasksRes.data);
       setEmployees(employeesRes.data);
       setRecipes(recipesRes.data);
+      setWoodStages(woodStagesRes.data);
+      setWasteTypes(wasteTypesRes.data);
     } catch (err) {
       setOptionsError(getApiErrorMessage(err, 'Could not reach the server. Check the console.'));
       console.error('Failed to load tasks/employees', err);
@@ -163,6 +229,64 @@ export default function DailyEntry() {
       console.error('Failed to save daily entry', err);
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  // -- Wood Processing Entry handlers --
+  const woodSelectedStage = woodStages.find((s) => String(s.id) === woodEntryForm.stageId);
+  const woodConsumedNum = Number(woodEntryForm.consumedQuantity) || 0;
+  const woodWasteNum = Number(woodEntryForm.wasteQuantity) || 0;
+  const woodDerivedOutput = woodConsumedNum - woodWasteNum;
+  const woodNeedsWasteType =
+    woodWasteNum > 0 && !woodSelectedStage?.defaultWasteTypeId && !woodEntryForm.wasteTypeId;
+
+  const handleWoodEntryChange = (field: keyof WoodEntryFormState, value: string) => {
+    setWoodEntryForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleWoodEntrySubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setWoodEntryFormError(null);
+    setWoodEntrySuccess(false);
+
+    if (!woodEntryForm.stageId) {
+      setWoodEntryFormError('Select a processing stage.');
+      return;
+    }
+    if (woodEntryForm.employeeIds.length === 0) {
+      setWoodEntryFormError('Select at least one artisan.');
+      return;
+    }
+    if (!woodConsumedNum || woodConsumedNum <= 0) {
+      setWoodEntryFormError('Enter how much was taken from stock (weight before processing).');
+      return;
+    }
+    if (woodWasteNum >= woodConsumedNum) {
+      setWoodEntryFormError('Waste must be less than the quantity taken -- there has to be some good output.');
+      return;
+    }
+    if (woodNeedsWasteType) {
+      setWoodEntryFormError('This stage has no default waste type -- pick one for the waste produced.');
+      return;
+    }
+
+    setWoodEntrySubmitting(true);
+    try {
+      await axios.post(`${API_URL}/wood-processing-entries`, {
+        stageId: Number(woodEntryForm.stageId),
+        employeeIds: woodEntryForm.employeeIds,
+        consumedQuantity: woodConsumedNum,
+        wasteQuantity: woodWasteNum,
+        wasteTypeId: woodEntryForm.wasteTypeId ? Number(woodEntryForm.wasteTypeId) : undefined,
+        entryDate: woodEntryForm.entryDate,
+      });
+      setWoodEntrySuccess(true);
+      setWoodEntryForm({ ...emptyWoodEntryForm, entryDate: woodEntryForm.entryDate });
+    } catch (err) {
+      setWoodEntryFormError(getApiErrorMessage(err, 'Could not reach the server. Check the console.'));
+      console.error('Failed to save wood processing entry', err);
+    } finally {
+      setWoodEntrySubmitting(false);
     }
   };
 
@@ -334,6 +458,128 @@ export default function DailyEntry() {
 
         {formError && <p className="mt-3 text-[0.8rem] font-semibold text-[#ef4444]">{formError}</p>}
         {success && <p className="mt-3 text-[0.8rem] font-semibold text-[#10b981]">Daily entry saved.</p>}
+      </div>
+
+      {/* New wood processing entry -- moved here from the Wood Processing
+          page so artisans can log raw-wood slicing/cutting work alongside
+          regular task entries in one place. Stock, purchases, and stage
+          configuration still live on the Wood Processing page. */}
+      <div className={`${cardClass} w-full mb-6`}>
+        <h3 className="text-base font-extrabold border-b border-[#e8e8e8] pb-2 mb-4 text-[#1E1E1E]">
+          <i className="fa-solid fa-square-plus mr-[0.4rem] text-[#e21e53]" />
+          New Wood Processing Entry
+        </h3>
+
+        <form onSubmit={handleWoodEntrySubmit} className="flex flex-wrap gap-4 md:items-end">
+          <div className="flex flex-col gap-[0.4rem] flex-1 min-w-[220px]">
+            <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Stage</label>
+            <select
+              value={woodEntryForm.stageId}
+              onChange={(e) => handleWoodEntryChange('stageId', e.target.value)}
+              required
+              disabled={loadingOptions || woodEntrySubmitting}
+              className={inputClass}
+            >
+              <option value="">Select a stage...</option>
+              {woodStages.map((stage) => (
+                <option key={stage.id} value={stage.id}>
+                  {stage.name} ({stage.inputType?.name} → {stage.outputType?.name})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex flex-col gap-[0.4rem] flex-1 min-w-[200px]">
+            <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Artisan(s)</label>
+            <MultiSelect
+              options={activeEmployees.map((employee) => ({ id: employee.id, label: employee.name }))}
+              selectedIds={woodEntryForm.employeeIds}
+              onChange={(ids) => setWoodEntryForm((prev) => ({ ...prev, employeeIds: ids }))}
+              placeholder="Select artisan(s)..."
+              disabled={loadingOptions || woodEntrySubmitting}
+            />
+          </div>
+
+          <div className="flex flex-col gap-[0.4rem] w-full sm:w-[190px]">
+            <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Quantity Taken (before processing)</label>
+            <input
+              type="number"
+              step="any"
+              value={woodEntryForm.consumedQuantity}
+              onChange={(e) => handleWoodEntryChange('consumedQuantity', e.target.value)}
+              placeholder="e.g. 10"
+              required
+              disabled={woodEntrySubmitting}
+              className={inputClass}
+            />
+          </div>
+
+          <div className="flex flex-col gap-[0.4rem] w-full sm:w-[150px]">
+            <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Waste Qty</label>
+            <input
+              type="number"
+              step="any"
+              value={woodEntryForm.wasteQuantity}
+              onChange={(e) => handleWoodEntryChange('wasteQuantity', e.target.value)}
+              placeholder="e.g. 1"
+              disabled={woodEntrySubmitting}
+              className={inputClass}
+            />
+          </div>
+
+          <div className="flex flex-col gap-[0.4rem] w-full sm:w-[150px]">
+            <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Output (auto)</label>
+            <div className={`${inputClass} bg-[#f8fafc] text-[#545454] flex items-center`}>
+              {woodConsumedNum > 0 ? formatQty(Math.max(woodDerivedOutput, 0)) : '—'}
+            </div>
+          </div>
+
+          {woodWasteNum > 0 && (
+            <div className="flex flex-col gap-[0.4rem] w-full sm:w-[180px]">
+              <label className="text-[0.8rem] font-bold text-[#1E1E1E]">
+                Waste Type {woodSelectedStage?.defaultWasteTypeId ? '(override)' : ''}
+              </label>
+              <select
+                value={woodEntryForm.wasteTypeId}
+                onChange={(e) => handleWoodEntryChange('wasteTypeId', e.target.value)}
+                disabled={woodEntrySubmitting}
+                className={inputClass}
+              >
+                <option value="">
+                  {woodSelectedStage?.defaultWasteType?.name
+                    ? `Default: ${woodSelectedStage.defaultWasteType.name}`
+                    : 'Select waste type'}
+                </option>
+                {wasteTypes.map((wt) => (
+                  <option key={wt.id} value={wt.id}>
+                    {wt.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          <div className="flex flex-col gap-[0.4rem] w-full sm:w-[160px]">
+            <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Date</label>
+            <input
+              type="date"
+              value={woodEntryForm.entryDate}
+              onChange={(e) => handleWoodEntryChange('entryDate', e.target.value)}
+              disabled={woodEntrySubmitting}
+              className={inputClass}
+            />
+          </div>
+
+          <button type="submit" disabled={woodEntrySubmitting || loadingOptions} className={primaryBtnClass}>
+            <i className={`fa-solid ${woodEntrySubmitting ? 'fa-spinner fa-spin' : 'fa-save'}`} />
+            {woodEntrySubmitting ? 'Saving...' : 'Add Entry'}
+          </button>
+        </form>
+
+        {woodEntryFormError && <p className="mt-3 text-[0.8rem] font-semibold text-[#ef4444]">{woodEntryFormError}</p>}
+        {woodEntrySuccess && (
+          <p className="mt-3 text-[0.8rem] font-semibold text-[#10b981]">Wood processing entry saved.</p>
+        )}
       </div>
 
       {/* Created entries list */}

@@ -55,6 +55,7 @@ const navGroups: NavGroup[] = [
       { icon: 'fa-gauge-high', label: 'Dashboard', path: '/' },
       { icon: 'fa-list-check', label: 'Tasks', path: '/tasks' },
       { icon: 'fa-sliders', label: 'Recipes', path: '/recipes' },
+      { icon: 'fa-hourglass-half', label: 'Unfinished Items', path: '/unfinished-items' },
       { icon: 'fa-pen-to-square', label: 'Daily Entry', path: '/daily-entry' },
       { icon: 'fa-clock-rotate-left', label: 'Activity Logs', path: '/activity-logs' },
     ],

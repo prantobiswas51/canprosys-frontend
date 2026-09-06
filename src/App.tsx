@@ -17,6 +17,7 @@ import EmployeeDashboard from './pages/EmployeeDashboard'
 import Employees from './pages/Employees'
 import RoleManagement from './pages/RoleManagement'
 import Recipes from './pages/Recipes'
+import UnfinishedItems from './pages/UnfinishedItems'
 import TransportManagement from './pages/TransportManagement'
 import ShipmentBasic from './pages/ShipmentBasic'
 import ApprovalQueue from './pages/ApprovalQueue'
@@ -24,10 +25,16 @@ import SystemSettings from './pages/SystemSettings'
 import UserManual from './pages/UserManual'
 import AiAssistant from './pages/AiAssistant'
 import MaintenanceCosts from './pages/MaintenanceCosts'
+import PrivacyPolicy from './pages/PrivacyPolicy'
+import TermsAndConditions from './pages/TermsAndConditions'
 
 function App() {
   return (
     <Routes>
+      {/* Public -- no login required, so Google's OAuth verification (and
+          anyone else) can load these without an account. */}
+      <Route path="/privacy-policy" element={<PrivacyPolicy />} />
+      <Route path="/terms-and-conditions" element={<TermsAndConditions />} />
       <Route element={<GuestLayout />}>
         <Route path="/login" element={<Login />} />
       </Route>
@@ -47,6 +54,7 @@ function App() {
         <Route path="/employees" element={<Employees />} />
         <Route path="/manage-roles" element={<RoleManagement />} />
         <Route path="/recipes" element={<Recipes />} />
+        <Route path="/unfinished-items" element={<UnfinishedItems />} />
         <Route path="/transport" element={<TransportManagement />} />
         <Route path="/shipment-basic" element={<ShipmentBasic />} />
         <Route path="/approvals" element={<ApprovalQueue />} />

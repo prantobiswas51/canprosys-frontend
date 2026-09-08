@@ -20,6 +20,12 @@ interface BackupLog {
   sizeBytes?: number;
   driveWebViewLink?: string;
   errorMessage?: string;
+  // uploads/ (NID images, etc.) isn't in Postgres, so it's archived
+  // separately alongside the DB dump -- not every row has one, e.g. runs
+  // from before this existed, or a fresh install with no uploads/ yet.
+  uploadsFileName?: string;
+  uploadsSizeBytes?: number;
+  uploadsDriveWebViewLink?: string;
 }
 
 const cardClass =
@@ -164,7 +170,8 @@ export default function SystemSettings() {
           <div>
             <h3 className="text-[1.05rem] font-extrabold text-[#1E1E1E]">Google Drive Backup</h3>
             <p className="text-[0.8rem] text-[#545454]">
-              Nightly database backups, uploaded automatically to a connected Google Drive account.
+              Nightly database backups (plus uploaded files like NID images), uploaded automatically to a
+              connected Google Drive account.
             </p>
           </div>
         </div>
@@ -248,36 +255,67 @@ export default function SystemSettings() {
                         </span>
                       )}
                     </td>
-                    <td className="py-3 pr-3 text-[#545454]">{formatBytes(log.sizeBytes)}</td>
-                    <td className="py-3 pr-3">
-                      {log.driveWebViewLink ? (
-                        <a
-                          href={log.driveWebViewLink}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="font-semibold text-[#e21e53] hover:underline"
-                        >
-                          {log.fileName ?? 'Open in Drive'}
-                        </a>
-                      ) : (
-                        <span className="text-[#545454]" title={log.errorMessage}>
-                          {log.fileName ?? '—'}
-                        </span>
-                      )}
+                    <td className="py-3 pr-3 text-[#545454]">
+                      <div className="flex flex-col gap-0.5">
+                        <span>{formatBytes(log.sizeBytes)}</span>
+                        {log.uploadsFileName && (
+                          <span className="text-[0.72rem] opacity-70">+{formatBytes(log.uploadsSizeBytes)}</span>
+                        )}
+                      </div>
                     </td>
                     <td className="py-3 pr-3">
-                      {log.driveWebViewLink && (
-                        // Plain <a>, not axios -- the backend responds with
-                        // Content-Disposition: attachment, so the browser
-                        // downloads it directly without navigating away.
-                        <a
-                          href={`${API_URL}/settings/backups/${log.id}/download`}
-                          className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#e8e8e8] text-[#545454] hover:bg-[#f8fafc] hover:text-[#1E1E1E] transition-colors duration-200"
-                          title="Download this backup file"
-                        >
-                          <i className="fa-solid fa-download" />
-                        </a>
-                      )}
+                      <div className="flex flex-col gap-1">
+                        {log.driveWebViewLink ? (
+                          <a
+                            href={log.driveWebViewLink}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="font-semibold text-[#e21e53] hover:underline"
+                          >
+                            {log.fileName ?? 'Open in Drive'}
+                          </a>
+                        ) : (
+                          <span className="text-[#545454]" title={log.errorMessage}>
+                            {log.fileName ?? '—'}
+                          </span>
+                        )}
+                        {log.uploadsFileName && (
+                          <a
+                            href={log.uploadsDriveWebViewLink}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-[0.72rem] text-[#3b82f6] hover:underline"
+                            title="Separate archive of the uploads/ folder (NID images, etc.) from this same backup run"
+                          >
+                            {log.uploadsFileName}
+                          </a>
+                        )}
+                      </div>
+                    </td>
+                    <td className="py-3 pr-3">
+                      <div className="flex flex-col gap-1">
+                        {log.driveWebViewLink && (
+                          // Plain <a>, not axios -- the backend responds with
+                          // Content-Disposition: attachment, so the browser
+                          // downloads it directly without navigating away.
+                          <a
+                            href={`${API_URL}/settings/backups/${log.id}/download`}
+                            className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#e8e8e8] text-[#545454] hover:bg-[#f8fafc] hover:text-[#1E1E1E] transition-colors duration-200"
+                            title="Download the database dump"
+                          >
+                            <i className="fa-solid fa-download" />
+                          </a>
+                        )}
+                        {log.uploadsFileName && (
+                          <a
+                            href={`${API_URL}/settings/backups/${log.id}/download-uploads`}
+                            className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#e8e8e8] text-[#545454] hover:bg-[#f8fafc] hover:text-[#1E1E1E] transition-colors duration-200"
+                            title="Download the uploads/ (NID images) archive"
+                          >
+                            <i className="fa-solid fa-images" />
+                          </a>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}

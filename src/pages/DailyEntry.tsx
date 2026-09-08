@@ -27,6 +27,19 @@ interface RecipeOption {
   sku: string;
 }
 
+// One row in the "New Daily Entry" form -- kept as an array so the form can
+// hold as many rows as needed and save them all in one go, instead of one
+// entry at a time (same "form is an array of rows" pattern already used for
+// Recipes' Artisan Wages/Materials rows).
+interface EntryRow {
+  taskId: string;
+  employeeIds: number[];
+  weightKg: string;
+  recipeId: string;
+}
+
+const emptyEntryRow: EntryRow = { taskId: '', employeeIds: [], weightKg: '', recipeId: '' };
+
 interface DailyEntryRecord {
   id: number;
   task: TaskOption;
@@ -108,14 +121,11 @@ export default function DailyEntry() {
   const [optionsError, setOptionsError] = useState<string | null>(null);
   const [listError, setListError] = useState<string | null>(null);
 
-  const [taskId, setTaskId] = useState('');
-  const [employeeIds, setEmployeeIds] = useState<number[]>([]);
-  const [weightKg, setWeightKg] = useState('');
-  const [recipeId, setRecipeId] = useState('');
+  const [entryRows, setEntryRows] = useState<EntryRow[]>([emptyEntryRow]);
 
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
-  const [success, setSuccess] = useState(false);
+  const [success, setSuccess] = useState<string | null>(null);
 
   // Edit modal state -- separate from the create form above so editing one
   // entry can't accidentally clobber whatever's half-typed into "New Daily
@@ -187,49 +197,93 @@ export default function DailyEntry() {
   // where someone picks an inactive artisan and only finds out on submit.
   const activeEmployees = employees.filter((e) => e.status === 'active');
 
-  const selectedTask = tasks.find((t) => String(t.id) === taskId);
-  const isProductApplicable = !!selectedTask && selectedTask.requiresProduct;
+  // Whether a given row's task needs a product/recipe picked -- per row,
+  // since each row can log a different task.
+  const isProductApplicableForRow = (row: EntryRow) => {
+    const task = tasks.find((t) => String(t.id) === row.taskId);
+    return !!task && task.requiresProduct;
+  };
 
-  const handleTaskChange = (value: string) => {
-    setTaskId(value);
-    setRecipeId('');
+  const updateRow = (index: number, field: keyof EntryRow, value: EntryRow[keyof EntryRow]) => {
+    setEntryRows((prev) => prev.map((row, i) => (i === index ? { ...row, [field]: value } : row)));
+  };
+
+  const handleRowTaskChange = (index: number, value: string) => {
+    // Changing the task can change whether a product applies at all --
+    // clear whatever was picked so a stale recipe never gets submitted for
+    // a task that no longer needs one.
+    setEntryRows((prev) => prev.map((row, i) => (i === index ? { ...row, taskId: value, recipeId: '' } : row)));
+  };
+
+  const addRow = () => {
+    setEntryRows((prev) => [...prev, emptyEntryRow]);
+  };
+
+  const removeRow = (index: number) => {
+    setEntryRows((prev) => (prev.length === 1 ? prev : prev.filter((_, i) => i !== index)));
   };
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setFormError(null);
-    setSuccess(false);
+    setSuccess(null);
 
-    if (employeeIds.length === 0) {
-      setFormError('Select at least one artisan.');
-      return;
-    }
-
-    if (isProductApplicable && !recipeId) {
-      setFormError('Select a product for this task.');
-      return;
+    for (let i = 0; i < entryRows.length; i++) {
+      const row = entryRows[i];
+      if (!row.taskId) {
+        setFormError(`Row ${i + 1}: select a task.`);
+        return;
+      }
+      if (row.employeeIds.length === 0) {
+        setFormError(`Row ${i + 1}: select at least one artisan.`);
+        return;
+      }
+      if (!row.weightKg) {
+        setFormError(`Row ${i + 1}: enter a quantity.`);
+        return;
+      }
+      if (isProductApplicableForRow(row) && !row.recipeId) {
+        setFormError(`Row ${i + 1}: select a product for this task.`);
+        return;
+      }
     }
 
     setSubmitting(true);
-    try {
-      await axios.post(`${API_URL}/daily-entries`, {
-        taskId: Number(taskId),
-        employeeIds,
-        weightKg: Number(weightKg),
-        recipeId: isProductApplicable ? Number(recipeId) : undefined,
-      });
-      setSuccess(true);
-      setTaskId('');
-      setEmployeeIds([]);
-      setWeightKg('');
-      setRecipeId('');
-      loadEntries();
-    } catch (err) {
-      setFormError(getApiErrorMessage(err, 'Could not reach the server. Check the console.'));
-      console.error('Failed to save daily entry', err);
-    } finally {
-      setSubmitting(false);
+    // Sequential, not Promise.all -- rows can draw from/credit the same
+    // recipe stage's WIP stock, so they need to apply one at a time in the
+    // order entered rather than racing each other.
+    const failures: string[] = [];
+    const failedRows: EntryRow[] = [];
+    let savedCount = 0;
+    for (let i = 0; i < entryRows.length; i++) {
+      const row = entryRows[i];
+      try {
+        await axios.post(`${API_URL}/daily-entries`, {
+          taskId: Number(row.taskId),
+          employeeIds: row.employeeIds,
+          weightKg: Number(row.weightKg),
+          recipeId: isProductApplicableForRow(row) ? Number(row.recipeId) : undefined,
+        });
+        savedCount++;
+      } catch (err) {
+        failures.push(`Row ${i + 1}: ${getApiErrorMessage(err, 'failed')}`);
+        failedRows.push(row);
+        console.error(`Failed to save daily entry row ${i + 1}`, err);
+      }
     }
+
+    if (failures.length === 0) {
+      setSuccess(`${savedCount} ${savedCount === 1 ? 'entry' : 'entries'} saved.`);
+      setEntryRows([emptyEntryRow]);
+    } else {
+      // Leave only the rows that failed in the form (renumbered) so
+      // whatever already saved doesn't need to be re-entered -- just fix
+      // and resubmit what's left.
+      setEntryRows(failedRows);
+      setFormError(`${savedCount} of ${entryRows.length} saved. ${failures.join(' ')}`);
+    }
+    loadEntries();
+    setSubmitting(false);
   };
 
   // -- Wood Processing Entry handlers --
@@ -377,87 +431,121 @@ export default function DailyEntry() {
 
         {optionsError && <p className="mb-3 text-[0.8rem] font-semibold text-[#ef4444]">{optionsError}</p>}
 
-        <form onSubmit={handleSubmit} className="flex flex-wrap gap-4 md:items-end">
-          <div className="flex flex-col gap-[0.4rem] flex-1 min-w-[180px]">
-            <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Task Name</label>
-
-            <select
-              value={taskId}
-              onChange={(e) => handleTaskChange(e.target.value)}
-              required
-              disabled={loadingOptions || submitting}
-              className={inputClass}
-            >
-              <option value="" disabled>
-                Select a task...
-              </option>
-              {tasks.map((task) => (
-                <option key={task.id} value={task.id}>
-                  {task.name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {isProductApplicable && (
-            <div className="flex flex-col gap-[0.4rem] flex-1 min-w-[180px]">
-              <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Product Name</label>
-              <select
-                value={recipeId}
-                onChange={(e) => setRecipeId(e.target.value)}
-                required
-                disabled={loadingOptions || submitting}
-                className={inputClass}
+        <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+          {entryRows.map((row, index) => {
+            const rowIsProductApplicable = isProductApplicableForRow(row);
+            return (
+              <div
+                key={index}
+                className="flex flex-wrap gap-4 md:items-end rounded-lg border border-[#e8e8e8] bg-[#f8fafc] p-3"
               >
-                <option value="" disabled>
-                  Select a product...
-                </option>
-                {recipes.map((recipe) => (
-                  <option key={recipe.id} value={recipe.id}>
-                    {recipe.product} ({recipe.sku})
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
+                <div className="flex flex-col gap-[0.4rem] flex-1 min-w-[180px]">
+                  {index === 0 && <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Task Name</label>}
+                  <select
+                    value={row.taskId}
+                    onChange={(e) => handleRowTaskChange(index, e.target.value)}
+                    required
+                    disabled={loadingOptions || submitting}
+                    className={inputClass}
+                  >
+                    <option value="" disabled>
+                      Select a task...
+                    </option>
+                    {tasks.map((task) => (
+                      <option key={task.id} value={task.id}>
+                        {task.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
-          <div className="flex flex-col gap-[0.4rem] flex-1 min-w-[180px]">
-            <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Select Artisan</label>
-            <MultiSelect
-              options={activeEmployees.map((employee) => ({ id: employee.id, label: employee.name }))}
-              selectedIds={employeeIds}
-              onChange={setEmployeeIds}
-              placeholder="Select artisan(s)..."
-              disabled={loadingOptions || submitting}
-            />
-          </div>
+                {rowIsProductApplicable && (
+                  <div className="flex flex-col gap-[0.4rem] flex-1 min-w-[180px]">
+                    {index === 0 && <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Product Name</label>}
+                    <select
+                      value={row.recipeId}
+                      onChange={(e) => updateRow(index, 'recipeId', e.target.value)}
+                      required
+                      disabled={loadingOptions || submitting}
+                      className={inputClass}
+                    >
+                      <option value="" disabled>
+                        Select a product...
+                      </option>
+                      {recipes.map((recipe) => (
+                        <option key={recipe.id} value={recipe.id}>
+                          {recipe.product} ({recipe.sku})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
 
-          <div className="flex flex-col gap-[0.4rem] w-full sm:w-[160px]">
-            <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Unit (kg/Pieces)</label>
-            <input
-              type="number"
-              step="any"
-              value={weightKg}
-              onChange={(e) => setWeightKg(e.target.value)}
-              placeholder="e.g. 12.5"
-              required
+                <div className="flex flex-col gap-[0.4rem] flex-1 min-w-[180px]">
+                  {index === 0 && <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Select Artisan</label>}
+                  <MultiSelect
+                    options={activeEmployees.map((employee) => ({ id: employee.id, label: employee.name }))}
+                    selectedIds={row.employeeIds}
+                    onChange={(ids) => updateRow(index, 'employeeIds', ids)}
+                    placeholder="Select artisan(s)..."
+                    disabled={loadingOptions || submitting}
+                  />
+                </div>
+
+                <div className="flex flex-col gap-[0.4rem] w-full sm:w-[160px]">
+                  {index === 0 && <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Unit (kg/Pieces)</label>}
+                  <input
+                    type="number"
+                    step="any"
+                    value={row.weightKg}
+                    onChange={(e) => updateRow(index, 'weightKg', e.target.value)}
+                    placeholder="e.g. 12.5"
+                    required
+                    disabled={submitting}
+                    className={inputClass}
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => removeRow(index)}
+                  disabled={submitting || entryRows.length === 1}
+                  title="Remove row"
+                  className="flex h-10 w-10 items-center justify-center rounded-lg border border-[#e8e8e8] text-[#545454] transition-colors duration-200 hover:border-[#ef4444] hover:text-[#ef4444] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  <i className="fa-solid fa-trash" />
+                </button>
+              </div>
+            );
+          })}
+
+          <div className="flex items-center justify-between gap-3">
+            <button
+              type="button"
+              onClick={addRow}
               disabled={submitting}
-              className={inputClass}
-            />
-          </div>
+              title="Add another row"
+              className="h-10 px-4 flex items-center gap-2 rounded-lg border border-dashed border-[#e21e53] text-[#e21e53] font-bold text-[0.875rem] transition-colors duration-200 hover:bg-[rgba(226,30,83,0.06)] disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
+            >
+              <i className="fa-solid fa-plus" />
+              Add Row
+            </button>
 
-          <button
-            type="submit"
-            disabled={submitting || loadingOptions}
-            className="h-10 w-full sm:w-[140px] flex items-center justify-center gap-2 rounded-lg bg-[#e21e53] text-white font-bold text-[0.875rem] transition-all duration-200 hover:bg-[#c01745] hover:-translate-y-px hover:shadow-[0_6px_14px_rgba(226,30,83,0.25)] active:translate-y-0 disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:translate-y-0 disabled:hover:shadow-none cursor-pointer"
-          >
-            <i className={`fa-solid ${submitting ? 'fa-spinner fa-spin' : 'fa-save'}`} />
-            {submitting ? 'Saving...' : 'Add Entry'}
-          </button>
+            <button
+              type="submit"
+              disabled={submitting || loadingOptions}
+              className="h-10 px-5 flex items-center justify-center gap-2 rounded-lg bg-[#e21e53] text-white font-bold text-[0.875rem] transition-all duration-200 hover:bg-[#c01745] hover:-translate-y-px hover:shadow-[0_6px_14px_rgba(226,30,83,0.25)] active:translate-y-0 disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:translate-y-0 disabled:hover:shadow-none cursor-pointer"
+            >
+              <i className={`fa-solid ${submitting ? 'fa-spinner fa-spin' : 'fa-save'}`} />
+              {submitting
+                ? 'Saving...'
+                : `Save ${entryRows.length > 1 ? `${entryRows.length} Entries` : 'Entry'}`}
+            </button>
+          </div>
         </form>
 
         {formError && <p className="mt-3 text-[0.8rem] font-semibold text-[#ef4444]">{formError}</p>}
-        {success && <p className="mt-3 text-[0.8rem] font-semibold text-[#10b981]">Daily entry saved.</p>}
+        {success && <p className="mt-3 text-[0.8rem] font-semibold text-[#10b981]">{success}</p>}
       </div>
 
       {/* New wood processing entry -- moved here from the Wood Processing

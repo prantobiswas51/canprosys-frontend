@@ -16,6 +16,18 @@ interface RawMaterialOption {
   unit: string;
 }
 
+// Admin-managed grouping for recipes (Canvas, Easel, ...) -- CRUD lives at
+// the top of this page, not hardcoded here, so new categories can be added
+// later without a code change. See RecipeCategory on the backend.
+interface CategoryOption {
+  id: number;
+  name: string;
+  // Whether recipes in this category go through a multi-stage pipeline
+  // (Step numbers required, per-stage WIP tracked) or finish in one step
+  // (any configured task directly completes a unit). See DailyEntryService.
+  hasSteps: boolean;
+}
+
 interface RecipeTaskRate {
   id: number;
   taskId: number;
@@ -42,6 +54,7 @@ interface Recipe {
   id: number;
   product: string;
   sku: string;
+  category?: CategoryOption | null;
   taskRates: RecipeTaskRate[];
   materialUsages: RecipeMaterialUsage[];
 }
@@ -67,6 +80,7 @@ interface MaterialUsageFormRow {
 interface RecipeFormState {
   product: string;
   sku: string;
+  categoryId: string;
   taskRates: TaskRateFormRow[];
   materialUsages: MaterialUsageFormRow[];
 }
@@ -89,6 +103,7 @@ interface ImportedMaterialUsage {
 interface ImportedRecipe {
   product: string;
   sku: string;
+  categoryName?: string | null;
   taskRates?: ImportedTaskRate[];
   materialUsages?: ImportedMaterialUsage[];
 }
@@ -96,6 +111,7 @@ interface ImportedRecipe {
 const emptyForm: RecipeFormState = {
   product: '',
   sku: '',
+  categoryId: '',
   taskRates: [],
   materialUsages: [],
 };
@@ -117,6 +133,9 @@ const inputClass =
 const cardClass =
   'bg-white border border-[#e8e8e8] rounded-xl p-5 shadow-[0_4px_6px_-1px_rgba(0,0,0,0.08),0_2px_4px_-2px_rgba(0,0,0,0.08)]';
 
+const primaryBtnClass =
+  'h-10 px-4 flex items-center gap-2 rounded-lg bg-[#e21e53] text-white font-bold text-[0.875rem] transition-all duration-200 hover:bg-[#c01745] disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer';
+
 export default function Recipes() {
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [loading, setLoading] = useState(false);
@@ -127,6 +146,25 @@ export default function Recipes() {
 
   const [rawMaterials, setRawMaterials] = useState<RawMaterialOption[]>([]);
   const [rawMaterialsError, setRawMaterialsError] = useState<string | null>(null);
+
+  const [categories, setCategories] = useState<CategoryOption[]>([]);
+  const [categoriesLoading, setCategoriesLoading] = useState(false);
+  const [categoriesError, setCategoriesError] = useState<string | null>(null);
+
+  // -- Category CRUD (lives here since it's Recipes' own admin-managed
+  // grouping field) --
+  const [newCategoryName, setNewCategoryName] = useState('');
+  const [newCategoryHasSteps, setNewCategoryHasSteps] = useState(true);
+  const [addingCategory, setAddingCategory] = useState(false);
+  const [addCategoryError, setAddCategoryError] = useState<string | null>(null);
+
+  const [editingCategoryId, setEditingCategoryId] = useState<number | null>(null);
+  const [editingCategoryName, setEditingCategoryName] = useState('');
+  const [editingCategoryHasSteps, setEditingCategoryHasSteps] = useState(true);
+  const [savingCategoryId, setSavingCategoryId] = useState<number | null>(null);
+  const [editCategoryError, setEditCategoryError] = useState<string | null>(null);
+
+  const [deletingCategoryId, setDeletingCategoryId] = useState<number | null>(null);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -139,6 +177,7 @@ export default function Recipes() {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterTaskId, setFilterTaskId] = useState('');
   const [filterRawMaterialId, setFilterRawMaterialId] = useState('');
+  const [filterCategoryId, setFilterCategoryId] = useState('');
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [importing, setImporting] = useState(false);
@@ -180,11 +219,95 @@ export default function Recipes() {
     }
   }, []);
 
+  const fetchCategories = useCallback(async () => {
+    setCategoriesLoading(true);
+    setCategoriesError(null);
+    try {
+      const res = await axios.get<CategoryOption[]>(`${API_URL}/recipe-categories`);
+      setCategories(res.data);
+    } catch (err) {
+      setCategoriesError(getApiErrorMessage(err, 'Could not reach the server. Check the console.'));
+      console.error('Failed to load categories', err);
+    } finally {
+      setCategoriesLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     fetchRecipes();
     fetchTasks();
     fetchRawMaterials();
-  }, [fetchRecipes, fetchTasks, fetchRawMaterials]);
+    fetchCategories();
+  }, [fetchRecipes, fetchTasks, fetchRawMaterials, fetchCategories]);
+
+  const handleAddCategory = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setAddCategoryError(null);
+    const name = newCategoryName.trim();
+    if (!name) return;
+
+    setAddingCategory(true);
+    try {
+      await axios.post(`${API_URL}/recipe-categories`, { name, hasSteps: newCategoryHasSteps });
+      setNewCategoryName('');
+      setNewCategoryHasSteps(true);
+      await fetchCategories();
+    } catch (err) {
+      setAddCategoryError(getApiErrorMessage(err, 'Could not reach the server. Check the console.'));
+      console.error('Failed to create category', err);
+    } finally {
+      setAddingCategory(false);
+    }
+  };
+
+  const openEditCategory = (category: CategoryOption) => {
+    setEditingCategoryId(category.id);
+    setEditingCategoryName(category.name);
+    setEditingCategoryHasSteps(category.hasSteps);
+    setEditCategoryError(null);
+  };
+
+  const cancelEditCategory = () => {
+    setEditingCategoryId(null);
+    setEditingCategoryName('');
+    setEditingCategoryHasSteps(true);
+    setEditCategoryError(null);
+  };
+
+  const handleSaveCategory = async (id: number) => {
+    const name = editingCategoryName.trim();
+    if (!name) {
+      setEditCategoryError('Name cannot be empty.');
+      return;
+    }
+    setSavingCategoryId(id);
+    setEditCategoryError(null);
+    try {
+      await axios.patch(`${API_URL}/recipe-categories/${id}`, { name, hasSteps: editingCategoryHasSteps });
+      cancelEditCategory();
+      await Promise.all([fetchCategories(), fetchRecipes()]);
+    } catch (err) {
+      setEditCategoryError(getApiErrorMessage(err, 'Could not reach the server. Check the console.'));
+      console.error('Failed to update category', err);
+    } finally {
+      setSavingCategoryId(null);
+    }
+  };
+
+  const handleDeleteCategory = async (category: CategoryOption) => {
+    if (!window.confirm(`Delete the "${category.name}" category?`)) return;
+    setDeletingCategoryId(category.id);
+    try {
+      await axios.delete(`${API_URL}/recipe-categories/${category.id}`);
+      if (filterCategoryId === String(category.id)) setFilterCategoryId('');
+      await fetchCategories();
+    } catch (err) {
+      window.alert(getApiErrorMessage(err, 'Failed to delete category. Check the console.'));
+      console.error('Failed to delete category', err);
+    } finally {
+      setDeletingCategoryId(null);
+    }
+  };
 
   const openCreateModal = () => {
     setEditingId(null);
@@ -198,6 +321,7 @@ export default function Recipes() {
     setForm({
       product: recipe.product,
       sku: recipe.sku,
+      categoryId: recipe.category?.id != null ? String(recipe.category.id) : '',
       taskRates: sortBySequence(recipe.taskRates).map((tr) => ({
         taskId: String(tr.taskId),
         rate: String(tr.rate),
@@ -218,7 +342,7 @@ export default function Recipes() {
     setModalOpen(false);
   };
 
-  const handleChange = (field: keyof Pick<RecipeFormState, 'product' | 'sku'>, value: string) => {
+  const handleChange = (field: keyof Pick<RecipeFormState, 'product' | 'sku' | 'categoryId'>, value: string) => {
     setForm((prev) => ({ ...prev, [field]: value }));
   };
 
@@ -293,6 +417,7 @@ export default function Recipes() {
 
     const payload = {
       ...form,
+      categoryId: form.categoryId.trim() === '' ? undefined : Number(form.categoryId),
       taskRates: form.taskRates.map((row) => ({
         taskId: Number(row.taskId),
         rate: Number(row.rate),
@@ -325,12 +450,14 @@ export default function Recipes() {
   // Client-side -- the recipe catalog is small enough that fetching once and
   // filtering here is simpler than a backend search endpoint, and keeps the
   // three filters (text, task, material) instantly combinable.
-  const filtersActive = searchQuery.trim() !== '' || filterTaskId !== '' || filterRawMaterialId !== '';
+  const filtersActive =
+    searchQuery.trim() !== '' || filterTaskId !== '' || filterRawMaterialId !== '' || filterCategoryId !== '';
 
   const clearFilters = () => {
     setSearchQuery('');
     setFilterTaskId('');
     setFilterRawMaterialId('');
+    setFilterCategoryId('');
   };
 
   const filteredRecipes = recipes.filter((recipe) => {
@@ -344,6 +471,9 @@ export default function Recipes() {
     if (filterRawMaterialId && !recipe.materialUsages.some((mu) => String(mu.rawMaterialId) === filterRawMaterialId)) {
       return false;
     }
+    if (filterCategoryId && String(recipe.category?.id ?? '') !== filterCategoryId) {
+      return false;
+    }
     return true;
   });
 
@@ -352,6 +482,7 @@ export default function Recipes() {
     const exportData: ImportedRecipe[] = recipes.map((r) => ({
       product: r.product,
       sku: r.sku,
+      categoryName: r.category?.name ?? undefined,
       taskRates: r.taskRates.map((tr) => ({ taskName: tr.taskName, rate: tr.rate, sequence: tr.sequence ?? undefined })),
       materialUsages: r.materialUsages.map((mu) => ({
         rawMaterialName: mu.rawMaterialName,
@@ -440,7 +571,16 @@ export default function Recipes() {
           return { rawMaterialId: material.id, quantity: Number(mu.quantity), taskId };
         });
 
-        const payload = { product: row.product.trim(), sku: row.sku.trim(), taskRates, materialUsages };
+        let categoryId: number | undefined;
+        if (row.categoryName?.trim()) {
+          const category = categories.find(
+            (c) => c.name.trim().toLowerCase() === row.categoryName!.trim().toLowerCase(),
+          );
+          if (!category) throw new Error(`unknown category "${row.categoryName}"`);
+          categoryId = category.id;
+        }
+
+        const payload = { product: row.product.trim(), sku: row.sku.trim(), categoryId, taskRates, materialUsages };
         const existing = knownRecipes.find(
           (r) => r.sku.trim().toLowerCase() === row.sku.trim().toLowerCase(),
         );
@@ -531,6 +671,144 @@ export default function Recipes() {
         </div>
       </div>
 
+      {/* Category CRUD -- admin-managed groupings (Canvas, Easel, ...) used
+          by the Category field below and by the Unfinished Items page. */}
+      <div className={`${cardClass} mb-4`}>
+        <div className="flex items-center justify-between border-b border-[#e8e8e8] pb-3 mb-4">
+          <h3 className="text-[1.05rem] font-extrabold text-[#1E1E1E]">
+            <i className="fa-solid fa-tags mr-2 text-[#e21e53]" />
+            Recipe Categories
+          </h3>
+          <span className="rounded-full bg-[rgba(59,130,246,0.1)] text-[#3b82f6] text-[0.7rem] font-bold px-3 py-1">
+            {categories.length} {categories.length === 1 ? 'category' : 'categories'}
+          </span>
+        </div>
+
+        <form onSubmit={handleAddCategory} className="flex flex-wrap gap-2 items-center mb-4">
+          <input
+            type="text"
+            value={newCategoryName}
+            onChange={(e) => setNewCategoryName(e.target.value)}
+            placeholder="e.g. Canvas, Easel"
+            disabled={addingCategory}
+            className={`${inputClass} flex-1 min-w-[200px]`}
+          />
+          <label className="flex items-center gap-2 text-[0.8rem] font-semibold text-[#545454] whitespace-nowrap">
+            <input
+              type="checkbox"
+              checked={newCategoryHasSteps}
+              onChange={(e) => setNewCategoryHasSteps(e.target.checked)}
+              disabled={addingCategory}
+              className="h-4 w-4 accent-[#e21e53] cursor-pointer"
+            />
+            Has multiple production steps
+          </label>
+          <button type="submit" disabled={addingCategory || !newCategoryName.trim()} className={primaryBtnClass}>
+            <i className={`fa-solid ${addingCategory ? 'fa-spinner fa-spin' : 'fa-plus'}`} />
+            {addingCategory ? 'Adding...' : 'Add Category'}
+          </button>
+        </form>
+        <p className="mb-4 text-[0.72rem] font-medium text-[#545454]">
+          Multi-step categories require a Step number on each recipe's tasks and track WIP between stages (see
+          Unfinished Items). Single-step categories finish in one task -- no Step numbers, no WIP tracking.
+        </p>
+        {addCategoryError && <p className="mb-3 text-[0.8rem] font-semibold text-[#ef4444]">{addCategoryError}</p>}
+
+        {categoriesError && <p className="text-[0.8rem] font-semibold text-[#ef4444]">{categoriesError}</p>}
+        {categoriesLoading && <p className="text-[0.8rem] font-semibold text-[#545454]">Loading categories...</p>}
+
+        {!categoriesLoading && !categoriesError && categories.length === 0 && (
+          <p className="text-[0.8rem] font-medium text-[#545454]">
+            No categories yet -- add one above (e.g. "Canvas" or "Easel").
+          </p>
+        )}
+
+        {!categoriesLoading && categories.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {categories.map((category) => (
+              <div
+                key={category.id}
+                className="flex items-center gap-2 rounded-lg border border-[#e8e8e8] bg-[#f8fafc] px-3 py-2"
+              >
+                {editingCategoryId === category.id ? (
+                  <>
+                    <input
+                      type="text"
+                      value={editingCategoryName}
+                      onChange={(e) => setEditingCategoryName(e.target.value)}
+                      disabled={savingCategoryId === category.id}
+                      autoFocus
+                      className={`${inputClass.replace('w-full ', '')} h-8 w-[160px] !py-1 !text-[0.8rem]`}
+                    />
+                    <label className="flex items-center gap-1 text-[0.72rem] font-semibold text-[#545454] whitespace-nowrap">
+                      <input
+                        type="checkbox"
+                        checked={editingCategoryHasSteps}
+                        onChange={(e) => setEditingCategoryHasSteps(e.target.checked)}
+                        disabled={savingCategoryId === category.id}
+                        className="h-3.5 w-3.5 accent-[#e21e53] cursor-pointer"
+                      />
+                      Multi-step
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => handleSaveCategory(category.id)}
+                      disabled={savingCategoryId === category.id}
+                      title="Save"
+                      className="flex h-7 w-7 items-center justify-center rounded-md text-[#16a34a] hover:bg-[rgba(34,197,94,0.1)] disabled:opacity-50 cursor-pointer"
+                    >
+                      <i className={`fa-solid ${savingCategoryId === category.id ? 'fa-spinner fa-spin' : 'fa-check'}`} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={cancelEditCategory}
+                      disabled={savingCategoryId === category.id}
+                      title="Cancel"
+                      className="flex h-7 w-7 items-center justify-center rounded-md text-[#545454] hover:bg-[#eef0f2] disabled:opacity-50 cursor-pointer"
+                    >
+                      <i className="fa-solid fa-xmark" />
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <span className="text-[0.85rem] font-semibold text-[#1E1E1E]">{category.name}</span>
+                    <span
+                      className={`rounded-full text-[0.62rem] font-bold uppercase tracking-[0.03em] px-2 py-0.5 ${
+                        category.hasSteps
+                          ? 'bg-[rgba(59,130,246,0.1)] text-[#3b82f6]'
+                          : 'bg-[rgba(107,114,128,0.12)] text-[#6b7280]'
+                      }`}
+                    >
+                      {category.hasSteps ? 'Multi-step' : 'Single-step'}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => openEditCategory(category)}
+                      title="Rename"
+                      className="flex h-7 w-7 items-center justify-center rounded-md text-[#545454] hover:bg-[#eef0f2] cursor-pointer"
+                    >
+                      <i className="fa-solid fa-pen text-[0.75rem]" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteCategory(category)}
+                      disabled={deletingCategoryId === category.id}
+                      title="Delete"
+                      className="flex h-7 w-7 items-center justify-center rounded-md text-[#ef4444] hover:bg-[rgba(239,68,68,0.08)] disabled:opacity-50 cursor-pointer"
+                    >
+                      <i
+                        className={`fa-solid text-[0.75rem] ${deletingCategoryId === category.id ? 'fa-spinner fa-spin' : 'fa-trash'}`}
+                      />
+                    </button>
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+        {editCategoryError && <p className="mt-2 text-[0.8rem] font-semibold text-[#ef4444]">{editCategoryError}</p>}
+      </div>
+
       {importSummary && (
         <p className="mb-4 rounded-lg border border-[#e8e8e8] bg-[#f8fafc] px-4 py-3 text-[0.8rem] font-semibold text-[#1E1E1E]">
           {importSummary}
@@ -575,6 +853,21 @@ export default function Recipes() {
               ))}
             </select>
           </div>
+          <div className="flex flex-col gap-[0.4rem] w-full sm:w-[200px]">
+            <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Filter by Category</label>
+            <select
+              value={filterCategoryId}
+              onChange={(e) => setFilterCategoryId(e.target.value)}
+              className={inputClass}
+            >
+              <option value="">All categories</option>
+              {categories.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </div>
           {filtersActive && (
             <button
               type="button"
@@ -612,7 +905,14 @@ export default function Recipes() {
             <div key={recipe.id} className={`${cardClass} flex flex-col justify-between`}>
               <div>
                 <div className="flex items-center justify-between border-b border-[#e8e8e8] pb-3 mb-3">
-                  <h3 className="text-[1.15rem] font-bold text-[#e21e53]">{recipe.product}</h3>
+                  <div className="flex flex-col gap-1">
+                    <h3 className="text-[1.15rem] font-bold text-[#e21e53]">{recipe.product}</h3>
+                    {recipe.category && (
+                      <span className="w-fit rounded-full bg-[rgba(16,185,129,0.1)] text-[#10b981] text-[0.65rem] font-bold px-2 py-0.5">
+                        {recipe.category.name}
+                      </span>
+                    )}
+                  </div>
                   <span className="rounded-full bg-[rgba(59,130,246,0.1)] text-[#3b82f6] text-[0.7rem] font-bold px-3 py-1">
                     SKU: {recipe.sku}
                   </span>
@@ -730,6 +1030,25 @@ export default function Recipes() {
                   disabled={submitting}
                   className={inputClass}
                 />
+              </div>
+              <div className="flex flex-col gap-[0.4rem]">
+                <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Category</label>
+                <select
+                  value={form.categoryId}
+                  onChange={(e) => handleChange('categoryId', e.target.value)}
+                  disabled={submitting}
+                  className={inputClass}
+                >
+                  <option value="">None</option>
+                  {categories.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+                {categoriesError && (
+                  <p className="text-[0.72rem] font-semibold text-[#ef4444]">{categoriesError}</p>
+                )}
               </div>
             </div>
           </div>

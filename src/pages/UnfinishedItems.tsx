@@ -5,6 +5,15 @@ import { formatQty } from '../utils/formatNumber';
 
 const API_URL = import.meta.env.VITE_API_URL;
 
+// Admin-managed grouping for recipes (Canvas, Easel, ...) -- its own CRUD
+// below, not a hardcoded enum, so new categories can be added later without
+// a code change. See RecipeCategory on the backend.
+interface RecipeCategory {
+  id: number;
+  name: string;
+  hasSteps: boolean;
+}
+
 interface RecipeTaskRate {
   id: number;
   taskId: number;
@@ -16,6 +25,7 @@ interface RecipeOption {
   id: number;
   product: string;
   sku: string;
+  category?: RecipeCategory | null;
   taskRates: RecipeTaskRate[];
 }
 
@@ -44,6 +54,13 @@ export default function UnfinishedItems() {
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const [filterRecipeId, setFilterRecipeId] = useState('');
+  const [filterCategoryId, setFilterCategoryId] = useState('');
+
+  // Categories are read-only here -- managed via the CRUD on the Recipes
+  // page, just used here to power the "Filter by Category" control and the
+  // category label on each card.
+  const [categories, setCategories] = useState<RecipeCategory[]>([]);
+  const [categoriesError, setCategoriesError] = useState<string | null>(null);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -63,9 +80,21 @@ export default function UnfinishedItems() {
     }
   }, []);
 
+  const loadCategories = useCallback(async () => {
+    setCategoriesError(null);
+    try {
+      const res = await axios.get<RecipeCategory[]>(`${API_URL}/recipe-categories`);
+      setCategories(res.data);
+    } catch (err) {
+      setCategoriesError(getApiErrorMessage(err, 'Could not reach the server. Check the console.'));
+      console.error('Failed to load categories', err);
+    }
+  }, []);
+
   useEffect(() => {
     loadAll();
-  }, [loadAll]);
+    loadCategories();
+  }, [loadAll, loadCategories]);
 
   // Only recipes that actually have some stage stock recorded -- a recipe
   // that's never had a Daily Entry logged against it has nothing to show
@@ -74,9 +103,17 @@ export default function UnfinishedItems() {
     stageStocks.some((s) => s.recipeId === recipe.id),
   );
 
-  const visibleRecipes = filterRecipeId
-    ? recipesWithStock.filter((r) => String(r.id) === filterRecipeId)
-    : recipesWithStock;
+  const visibleRecipes = recipesWithStock.filter((r) => {
+    if (filterRecipeId && String(r.id) !== filterRecipeId) return false;
+    if (filterCategoryId && String(r.category?.id ?? '') !== filterCategoryId) return false;
+    return true;
+  });
+
+  const filtersActive = filterRecipeId !== '' || filterCategoryId !== '';
+  const clearFilters = () => {
+    setFilterRecipeId('');
+    setFilterCategoryId('');
+  };
 
   return (
     <div>
@@ -86,6 +123,10 @@ export default function UnfinishedItems() {
           Work-in-progress sitting at each stage of a recipe's pipeline, right now.
         </p>
       </div>
+
+      {categoriesError && (
+        <p className="mb-4 text-[0.8rem] font-semibold text-[#ef4444]">{categoriesError}</p>
+      )}
 
       {loadError && <p className="mb-4 text-[0.8rem] font-semibold text-[#ef4444]">{loadError}</p>}
 
@@ -106,13 +147,28 @@ export default function UnfinishedItems() {
               ))}
             </select>
           </div>
-          {filterRecipeId && (
+          <div className="flex flex-col gap-[0.4rem] w-full sm:w-[220px]">
+            <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Filter by Category</label>
+            <select
+              value={filterCategoryId}
+              onChange={(e) => setFilterCategoryId(e.target.value)}
+              className={inputClass}
+            >
+              <option value="">All categories</option>
+              {categories.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          {filtersActive && (
             <button
               type="button"
-              onClick={() => setFilterRecipeId('')}
+              onClick={clearFilters}
               className="h-10 px-4 rounded-lg border border-[#e8e8e8] text-[#545454] font-bold text-[0.8rem] hover:bg-[#f8fafc] hover:text-[#1E1E1E] transition-colors duration-200 cursor-pointer"
             >
-              Clear Filter
+              Clear Filters
             </button>
           )}
         </div>
@@ -126,7 +182,16 @@ export default function UnfinishedItems() {
         </p>
       )}
 
-      {!loading && !loadError && recipesWithStock.length > 0 && (
+      {!loading && !loadError && recipesWithStock.length > 0 && visibleRecipes.length === 0 && (
+        <p className="text-[0.8rem] font-semibold text-[#545454]">
+          No recipes match your filters.{' '}
+          <button type="button" onClick={clearFilters} className="font-bold text-[#e21e53] cursor-pointer underline">
+            Clear filters
+          </button>
+        </p>
+      )}
+
+      {!loading && !loadError && visibleRecipes.length > 0 && (
         <div className="grid grid-cols-[repeat(auto-fit,minmax(280px,1fr))] gap-4">
           {visibleRecipes.map((recipe) => {
             const rows = stageStocks.filter((s) => s.recipeId === recipe.id);
@@ -136,13 +201,18 @@ export default function UnfinishedItems() {
             );
             return (
               <div key={recipe.id} className={cardClass}>
-                <div className="flex items-center justify-between border-b border-[#e8e8e8] pb-3 mb-3">
+                <div className="flex items-center justify-between border-b border-[#e8e8e8] pb-3 mb-1">
                   <h3 className="text-[1.15rem] font-bold text-[#e21e53]">{recipe.product}</h3>
                   <span className="rounded-full bg-[rgba(59,130,246,0.1)] text-[#3b82f6] text-[0.7rem] font-bold px-3 py-1">
                     SKU: {recipe.sku}
                   </span>
                 </div>
-                <div className="flex flex-col gap-[0.5rem]">
+                {recipe.category && (
+                  <p className="text-[0.68rem] font-bold uppercase tracking-[0.05em] text-[#545454] mb-3">
+                    {recipe.category.name}
+                  </p>
+                )}
+                <div className={`flex flex-col gap-[0.5rem] ${recipe.category ? '' : 'mt-3'}`}>
                   {sorted.map((s) => (
                     <div key={s.id} className="flex items-center justify-between text-[0.9rem]">
                       <span className="text-[#545454]">{s.taskName}</span>

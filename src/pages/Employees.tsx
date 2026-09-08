@@ -5,6 +5,18 @@ import { getApiErrorMessage } from '../utils/apiError';
 
 const API_URL = import.meta.env.VITE_API_URL;
 
+// Matches the backend's own numbers (see nid-upload.config.ts /
+// nid-image-compress.ts): anything over 1MB gets auto-compressed server-side
+// rather than rejected, so this is just a target to show the user, not a
+// hard block. NID_MAX_UPLOAD_BYTES is the backend's hard ceiling -- past
+// that it's not a normal phone photo anymore, reject before even uploading.
+const NID_TARGET_BYTES = 1 * 1024 * 1024;
+const NID_MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
+
+function formatFileSize(bytes: number): string {
+  return bytes >= 1024 * 1024 ? `${(bytes / (1024 * 1024)).toFixed(1)}MB` : `${Math.round(bytes / 1024)}KB`;
+}
+
 type EmployeeStatus = 'active' | 'inactive';
 type NidStatus = 'pending' | 'approved' | 'rejected';
 
@@ -102,6 +114,12 @@ export default function Employees() {
   const [nidBackFile, setNidBackFile] = useState<File | null>(null);
   const [nidFrontPreview, setNidFrontPreview] = useState<string | null>(null);
   const [nidBackPreview, setNidBackPreview] = useState<string | null>(null);
+  // Client-side pre-check only -- the backend compresses anything over 1MB
+  // automatically (see nid-image-compress.ts), so this just rejects clearly
+  // wrong picks (non-images, or absurdly large files) before a slow upload
+  // even starts, matching the backend's own hard ceiling.
+  const [nidFrontFileError, setNidFrontFileError] = useState<string | null>(null);
+  const [nidBackFileError, setNidBackFileError] = useState<string | null>(null);
 
   const [deletingId, setDeletingId] = useState<number | null>(null);
 
@@ -168,6 +186,8 @@ export default function Employees() {
     setForm(emptyForm);
     setNidFrontFile(null);
     setNidBackFile(null);
+    setNidFrontFileError(null);
+    setNidBackFileError(null);
     setFormError(null);
     setModalOpen(true);
   };
@@ -183,8 +203,42 @@ export default function Employees() {
     });
     setNidFrontFile(null);
     setNidBackFile(null);
+    setNidFrontFileError(null);
+    setNidBackFileError(null);
     setFormError(null);
     setModalOpen(true);
+  };
+
+  // Shared by both NID file inputs -- rejects non-images and anything past
+  // the backend's hard ceiling outright (clear feedback before a pointless
+  // upload attempt), but anything else is accepted even if it's over the
+  // 1MB target: the backend compresses it automatically.
+  const handleNidFileSelect = (
+    file: File | null,
+    setFile: (f: File | null) => void,
+    setError: (e: string | null) => void,
+  ) => {
+    if (!file) {
+      setFile(null);
+      setError(null);
+      return;
+    }
+    if (!file.type.startsWith('image/')) {
+      setFile(null);
+      setError('Only image files are allowed.');
+      return;
+    }
+    if (file.size > NID_MAX_UPLOAD_BYTES) {
+      setFile(null);
+      setError(`That file is ${formatFileSize(file.size)} -- too large even to compress. Pick a smaller image.`);
+      return;
+    }
+    setFile(file);
+    setError(
+      file.size > NID_TARGET_BYTES
+        ? `${formatFileSize(file.size)} -- will be compressed to under 1MB automatically on upload.`
+        : null,
+    );
   };
 
   const closeModal = () => {
@@ -212,8 +266,17 @@ export default function Employees() {
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    setSubmitting(true);
     setFormError(null);
+
+    // A rejected file (bad type / past the hard ceiling) clears the File
+    // itself but leaves the message up -- catches the case where someone
+    // never picks a replacement after a rejection.
+    if ((nidFrontFileError && !nidFrontFile) || (nidBackFileError && !nidBackFile)) {
+      setFormError('Fix the NID image issue above before saving.');
+      return;
+    }
+
+    setSubmitting(true);
 
     const payload = {
       name: form.name,
@@ -509,7 +572,8 @@ export default function Employees() {
               {editingEmployee && <NidBadge status={editingEmployee.nidStatus} />}
             </div>
             <p className="text-[0.72rem] text-[#545454] -mt-1">
-              Uploading an image (re)sets verification status to Pending.
+              Uploading an image (re)sets verification status to Pending. Max 1MB -- larger images are
+              compressed automatically.
             </p>
             <div className="grid grid-cols-2 gap-3">
               <div className="flex flex-col gap-[0.35rem]">
@@ -524,10 +588,17 @@ export default function Employees() {
                 <input
                   type="file"
                   accept="image/*"
-                  onChange={(e) => setNidFrontFile(e.target.files?.[0] ?? null)}
+                  onChange={(e) =>
+                    handleNidFileSelect(e.target.files?.[0] ?? null, setNidFrontFile, setNidFrontFileError)
+                  }
                   disabled={submitting}
                   className="text-[0.72rem] text-[#545454] file:mr-2 file:rounded-md file:border-0 file:bg-white file:px-2 file:py-1 file:text-[0.7rem] file:font-bold file:text-[#e21e53] disabled:opacity-60"
                 />
+                {nidFrontFileError && (
+                  <p className={`text-[0.68rem] font-semibold ${nidFrontFile ? 'text-[#f59e0b]' : 'text-[#ef4444]'}`}>
+                    {nidFrontFileError}
+                  </p>
+                )}
               </div>
               <div className="flex flex-col gap-[0.35rem]">
                 <span className="text-[0.7rem] font-bold uppercase tracking-[0.05em] text-[#545454]">Back</span>
@@ -541,10 +612,17 @@ export default function Employees() {
                 <input
                   type="file"
                   accept="image/*"
-                  onChange={(e) => setNidBackFile(e.target.files?.[0] ?? null)}
+                  onChange={(e) =>
+                    handleNidFileSelect(e.target.files?.[0] ?? null, setNidBackFile, setNidBackFileError)
+                  }
                   disabled={submitting}
                   className="text-[0.72rem] text-[#545454] file:mr-2 file:rounded-md file:border-0 file:bg-white file:px-2 file:py-1 file:text-[0.7rem] file:font-bold file:text-[#e21e53] disabled:opacity-60"
                 />
+                {nidBackFileError && (
+                  <p className={`text-[0.68rem] font-semibold ${nidBackFile ? 'text-[#f59e0b]' : 'text-[#ef4444]'}`}>
+                    {nidBackFileError}
+                  </p>
+                )}
               </div>
             </div>
           </div>

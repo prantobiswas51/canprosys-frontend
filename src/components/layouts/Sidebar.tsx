@@ -88,6 +88,7 @@ const navGroups: NavGroup[] = [
     label: 'Settings & Admin',
     items: [
       { icon: 'fa-list-check', label: 'Role Management', path: '/manage-roles', superAdminOnly: true },
+      { icon: 'fa-clock', label: 'Stock Backfill (temp)', path: '/stock-backfill', superAdminOnly: true },
       { icon: 'fa-truck-fast', label: 'Shipment Basic', path: '/shipment-basic' },
 
       { icon: 'fa-truck', label: 'Transport Management', path: '/transport' },

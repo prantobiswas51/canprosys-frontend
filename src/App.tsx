@@ -9,6 +9,7 @@ import DailyEntry from './pages/DailyEntry'
 import ActivityLogs from './pages/ActivityLogs'
 import Inventory from './pages/Inventory'
 import MaterialMixing from './pages/MaterialMixing'
+import StockBackfill from './pages/StockBackfill'
 import FinishedProducts from './pages/FinishedProducts'
 import WasteManagement from './pages/WasteManagement'
 import WoodProcessing from './pages/WoodProcessing'
@@ -47,6 +48,7 @@ function App() {
         <Route path="/activity-logs" element={<ActivityLogs />} />
         <Route path="/inventory" element={<Inventory />} />
         <Route path="/material-mixing" element={<MaterialMixing />} />
+        <Route path="/stock-backfill" element={<StockBackfill />} />
         <Route path="/finished-products" element={<FinishedProducts />} />
         <Route path="/waste-management" element={<WasteManagement />} />
         <Route path="/wood-processing" element={<WoodProcessing />} />

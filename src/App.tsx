@@ -27,6 +27,7 @@ import SystemSettings from './pages/SystemSettings'
 import UserManual from './pages/UserManual'
 import AiAssistant from './pages/AiAssistant'
 import MaintenanceCosts from './pages/MaintenanceCosts'
+import CustomOrders from './pages/CustomOrders'
 import PrivacyPolicy from './pages/PrivacyPolicy'
 import TermsAndConditions from './pages/TermsAndConditions'
 
@@ -66,6 +67,7 @@ function App() {
         <Route path="/user-manual" element={<UserManual />} />
         <Route path="/ai-assistant" element={<AiAssistant />} />
         <Route path="/maintenance-costs" element={<MaintenanceCosts />} />
+        <Route path="/custom-orders" element={<CustomOrders />} />
       </Route>
       </Route>
     </Routes>

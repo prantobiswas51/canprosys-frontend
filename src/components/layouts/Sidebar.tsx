@@ -1,5 +1,9 @@
+import { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
+import axios from 'axios';
 import { useAuth } from '../../context/AuthContext';
+
+const API_URL = import.meta.env.VITE_API_URL;
 
 const navBtnBase =
   'relative w-full flex items-center gap-3 whitespace-nowrap rounded-xl px-[1.15rem] py-[0.85rem] text-[0.9rem] font-semibold cursor-pointer transition-all duration-200 ease-in-out shadow-[0_1px_2px_0_rgba(0,0,0,0.05)]';
@@ -28,8 +32,12 @@ function ActivePip() {
 }
 
 function BadgeCount({ count }: { count: number }) {
+  // Amber, not red -- the nav button itself turns red/pink when active
+  // (navBtnActive), so a red badge on top of it disappeared. Amber also
+  // matches the existing "Pending" status color elsewhere in the app,
+  // which is what this count actually represents.
   return (
-    <span className="absolute right-5 top-1/2 -translate-y-1/2 rounded-full bg-[#e21e53] px-[0.4rem] py-[0.1rem] text-[0.65rem] font-extrabold text-white shadow-[0_0_6px_rgba(226,30,83,0.4)]">
+    <span className="absolute right-5 top-1/2 -translate-y-1/2 rounded-full bg-[#f59e0b] px-[0.4rem] py-[0.1rem] text-[0.65rem] font-extrabold text-[#1E1E1E] shadow-[0_0_6px_rgba(245,158,11,0.5)]">
       {count}
     </span>
   );
@@ -58,6 +66,7 @@ const navGroups: NavGroup[] = [
       { icon: 'fa-hourglass-half', label: 'Unfinished Items', path: '/unfinished-items' },
       { icon: 'fa-pen-to-square', label: 'Daily Entry', path: '/daily-entry' },
       { icon: 'fa-clock-rotate-left', label: 'Activity Logs', path: '/activity-logs' },
+      { icon: 'fa-clipboard-list', label: 'Custom Orders', path: '/custom-orders' },
     ],
   },
   {
@@ -103,6 +112,34 @@ export default function Sidebar() {
   const { user } = useAuth();
   const isSuperAdmin = user?.role?.name === 'super_admin';
 
+  // Badge on "Custom Orders" -- count of orders still sitting at "pending"
+  // (i.e. not yet looked at/actioned), so a new order placed by a third
+  // party shows up here without needing to open the page. Polled rather
+  // than pushed since there's no websocket/notification channel in this
+  // app yet.
+  const [pendingOrdersCount, setPendingOrdersCount] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadPendingOrders = async () => {
+      try {
+        const res = await axios.get<unknown[]>(`${API_URL}/custom-orders`, {
+          params: { status: 'pending' },
+        });
+        if (!cancelled) setPendingOrdersCount(res.data.length);
+      } catch {
+        // Best-effort -- a failed poll just means the badge doesn't update
+        // this round, not worth surfacing an error over.
+      }
+    };
+    loadPendingOrders();
+    const interval = setInterval(loadPendingOrders, 30000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, []);
+
   return (
     <aside className="sticky top-[4.5rem] flex h-fit flex-col gap-[0.1rem] self-start">
       {navGroups.map((group) => {
@@ -114,25 +151,28 @@ export default function Sidebar() {
             <span className="block px-[0.85rem] pb-[0.15rem] pt-[0.4rem] text-[0.6rem] font-extrabold uppercase tracking-[0.1em] text-[#545454] opacity-60">
               {group.label}
             </span>
-            {visibleItems.map((item) => (
-              <NavLink
-                key={item.label}
-                to={item.path}
-                end={item.path === '/'}
-                className={({ isActive }: { isActive: boolean }) =>
-                  `${navBtnBase} ${isActive ? navBtnActive : navBtnInactive}`
-                }
-              >
-                {({ isActive }: { isActive: boolean }) => (
-                  <>
-                    <NavIcon icon={item.icon} active={isActive} />
-                    <span>{item.label}</span>
-                    {item.badge != null && <BadgeCount count={item.badge} />}
-                    {isActive && <ActivePip />}
-                  </>
-                )}
-              </NavLink>
-            ))}
+            {visibleItems.map((item) => {
+              const badgeCount = item.path === '/custom-orders' ? pendingOrdersCount : item.badge;
+              return (
+                <NavLink
+                  key={item.label}
+                  to={item.path}
+                  end={item.path === '/'}
+                  className={({ isActive }: { isActive: boolean }) =>
+                    `${navBtnBase} ${isActive ? navBtnActive : navBtnInactive}`
+                  }
+                >
+                  {({ isActive }: { isActive: boolean }) => (
+                    <>
+                      <NavIcon icon={item.icon} active={isActive} />
+                      <span>{item.label}</span>
+                      {badgeCount != null && badgeCount > 0 && <BadgeCount count={badgeCount} />}
+                      {isActive && <ActivePip />}
+                    </>
+                  )}
+                </NavLink>
+              );
+            })}
           </div>
         );
       })}

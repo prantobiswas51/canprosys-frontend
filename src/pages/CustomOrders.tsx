@@ -8,33 +8,44 @@ const API_URL = import.meta.env.VITE_API_URL;
 type CanvasType = 'circle' | 'square';
 type OrderStatus = 'pending' | 'in_progress' | 'completed';
 
+interface CustomOrderItem {
+  id: number;
+  width: number;
+  height: number;
+  canvasType: CanvasType;
+  quantity: number;
+}
+
 interface CustomOrder {
   id: number;
   clientOrderNum: string;
-  width: number;
-  height: number;
   note: string | null;
-  canvasType: CanvasType;
   deadline: string;
   status: OrderStatus;
+  items: CustomOrderItem[];
   createdAt: string;
+}
+
+// One row in the repeatable item list on the New Order form / Edit modal --
+// not the same shape as CustomOrderItem since these are raw string inputs.
+interface ItemRow {
+  width: string;
+  height: string;
+  canvasType: CanvasType;
+  quantity: string;
 }
 
 interface OrderFormState {
   clientOrderNum: string;
-  width: string;
-  height: string;
   note: string;
-  canvasType: CanvasType;
   deadline: string;
 }
 
+const emptyItemRow: ItemRow = { width: '', height: '', canvasType: 'square', quantity: '1' };
+
 const emptyOrderForm: OrderFormState = {
   clientOrderNum: '',
-  width: '',
-  height: '',
   note: '',
-  canvasType: 'square',
   deadline: '',
 };
 
@@ -107,12 +118,14 @@ export default function CustomOrders() {
 
   // ── New order form ──
   const [form, setForm] = useState<OrderFormState>(emptyOrderForm);
+  const [itemRows, setItemRows] = useState<ItemRow[]>([{ ...emptyItemRow }]);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
   // ── Edit order modal ──
   const [editOrder, setEditOrder] = useState<CustomOrder | null>(null);
   const [editForm, setEditForm] = useState<OrderFormState>(emptyOrderForm);
+  const [editItemRows, setEditItemRows] = useState<ItemRow[]>([{ ...emptyItemRow }]);
   const [editStatus, setEditStatus] = useState<OrderStatus>('pending');
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [editFormError, setEditFormError] = useState<string | null>(null);
@@ -190,6 +203,29 @@ export default function CustomOrders() {
     setForm((prev) => ({ ...prev, [field]: value }));
   };
 
+  // ── Item rows (New Order form) ──
+  const addItemRow = () => setItemRows((prev) => [...prev, { ...emptyItemRow }]);
+  const removeItemRow = (index: number) => setItemRows((prev) => prev.filter((_, i) => i !== index));
+  const updateItemRow = (index: number, field: keyof ItemRow, value: string) =>
+    setItemRows((prev) => prev.map((row, i) => (i === index ? { ...row, [field]: value } : row)));
+
+  // ── Item rows (Edit modal) ──
+  const addEditItemRow = () => setEditItemRows((prev) => [...prev, { ...emptyItemRow }]);
+  const removeEditItemRow = (index: number) =>
+    setEditItemRows((prev) => prev.filter((_, i) => i !== index));
+  const updateEditItemRow = (index: number, field: keyof ItemRow, value: string) =>
+    setEditItemRows((prev) => prev.map((row, i) => (i === index ? { ...row, [field]: value } : row)));
+
+  const validateItemRows = (rows: ItemRow[]): string | null => {
+    if (rows.length === 0) return 'Add at least one item.';
+    for (const row of rows) {
+      if (!row.width || Number(row.width) <= 0) return 'Enter a width greater than zero for every item.';
+      if (!row.height || Number(row.height) <= 0) return 'Enter a height greater than zero for every item.';
+      if (!row.quantity || Number(row.quantity) <= 0) return 'Enter a quantity greater than zero for every item.';
+    }
+    return null;
+  };
+
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setFormError(null);
@@ -198,16 +234,13 @@ export default function CustomOrders() {
       setFormError('Client order # is required.');
       return;
     }
-    if (!form.width || Number(form.width) <= 0) {
-      setFormError('Enter a width greater than zero.');
-      return;
-    }
-    if (!form.height || Number(form.height) <= 0) {
-      setFormError('Enter a height greater than zero.');
-      return;
-    }
     if (!form.deadline) {
       setFormError('Deadline is required.');
+      return;
+    }
+    const itemsError = validateItemRows(itemRows);
+    if (itemsError) {
+      setFormError(itemsError);
       return;
     }
 
@@ -215,13 +248,17 @@ export default function CustomOrders() {
     try {
       await axios.post(`${API_URL}/custom-orders`, {
         clientOrderNum: form.clientOrderNum.trim(),
-        width: Number(form.width),
-        height: Number(form.height),
         note: form.note.trim() || undefined,
-        canvasType: form.canvasType,
         deadline: form.deadline,
+        items: itemRows.map((r) => ({
+          width: Number(r.width),
+          height: Number(r.height),
+          canvasType: r.canvasType,
+          quantity: Number(r.quantity),
+        })),
       });
       setForm(emptyOrderForm);
+      setItemRows([{ ...emptyItemRow }]);
       setPage(1);
       loadOrders();
     } catch (err) {
@@ -236,12 +273,19 @@ export default function CustomOrders() {
     setEditOrder(order);
     setEditForm({
       clientOrderNum: order.clientOrderNum,
-      width: String(order.width),
-      height: String(order.height),
       note: order.note ?? '',
-      canvasType: order.canvasType,
       deadline: order.deadline.slice(0, 10),
     });
+    setEditItemRows(
+      order.items.length > 0
+        ? order.items.map((item) => ({
+            width: String(item.width),
+            height: String(item.height),
+            canvasType: item.canvasType,
+            quantity: String(item.quantity),
+          }))
+        : [{ ...emptyItemRow }],
+    );
     setEditStatus(order.status);
     setEditFormError(null);
   };
@@ -264,16 +308,13 @@ export default function CustomOrders() {
       setEditFormError('Client order # is required.');
       return;
     }
-    if (!editForm.width || Number(editForm.width) <= 0) {
-      setEditFormError('Enter a width greater than zero.');
-      return;
-    }
-    if (!editForm.height || Number(editForm.height) <= 0) {
-      setEditFormError('Enter a height greater than zero.');
-      return;
-    }
     if (!editForm.deadline) {
       setEditFormError('Deadline is required.');
+      return;
+    }
+    const itemsError = validateItemRows(editItemRows);
+    if (itemsError) {
+      setEditFormError(itemsError);
       return;
     }
 
@@ -281,12 +322,15 @@ export default function CustomOrders() {
     try {
       await axios.patch(`${API_URL}/custom-orders/${editOrder.id}`, {
         clientOrderNum: editForm.clientOrderNum.trim(),
-        width: Number(editForm.width),
-        height: Number(editForm.height),
         note: editForm.note.trim() || null,
-        canvasType: editForm.canvasType,
         deadline: editForm.deadline,
         status: editStatus,
+        items: editItemRows.map((r) => ({
+          width: Number(r.width),
+          height: Number(r.height),
+          canvasType: r.canvasType,
+          quantity: Number(r.quantity),
+        })),
       });
       setEditOrder(null);
       loadOrders();
@@ -401,6 +445,77 @@ export default function CustomOrders() {
     }
   };
 
+  // Shared markup for one item row (width/height/canvas type/quantity) --
+  // used by both the New Order form and the Edit modal.
+  const renderItemRow = (
+    row: ItemRow,
+    index: number,
+    onUpdate: (index: number, field: keyof ItemRow, value: string) => void,
+    onRemove: (index: number) => void,
+    disabled: boolean,
+    canRemove: boolean,
+  ) => (
+    <div key={index} className="grid grid-cols-2 sm:grid-cols-[1fr_1fr_1.2fr_0.8fr_auto] gap-2 items-end">
+      <div className="flex flex-col gap-1">
+        <label className="text-[0.7rem] font-bold text-[#545454]">Width</label>
+        <input
+          type="number"
+          min="0.01"
+          step="0.01"
+          value={row.width}
+          onChange={(e) => onUpdate(index, 'width', e.target.value)}
+          disabled={disabled}
+          className={inputClass}
+        />
+      </div>
+      <div className="flex flex-col gap-1">
+        <label className="text-[0.7rem] font-bold text-[#545454]">Height</label>
+        <input
+          type="number"
+          min="0.01"
+          step="0.01"
+          value={row.height}
+          onChange={(e) => onUpdate(index, 'height', e.target.value)}
+          disabled={disabled}
+          className={inputClass}
+        />
+      </div>
+      <div className="flex flex-col gap-1">
+        <label className="text-[0.7rem] font-bold text-[#545454]">Canvas Type</label>
+        <select
+          value={row.canvasType}
+          onChange={(e) => onUpdate(index, 'canvasType', e.target.value)}
+          disabled={disabled}
+          className={inputClass}
+        >
+          <option value="square">Square</option>
+          <option value="circle">Circle</option>
+        </select>
+      </div>
+      <div className="flex flex-col gap-1">
+        <label className="text-[0.7rem] font-bold text-[#545454]">Qty</label>
+        <input
+          type="number"
+          min="1"
+          step="1"
+          value={row.quantity}
+          onChange={(e) => onUpdate(index, 'quantity', e.target.value)}
+          disabled={disabled}
+          className={inputClass}
+        />
+      </div>
+      <button
+        type="button"
+        onClick={() => onRemove(index)}
+        disabled={disabled || !canRemove}
+        className="h-10 w-10 inline-flex items-center justify-center rounded-lg border border-[#e8e8e8] text-[#ef4444] hover:bg-[rgba(239,68,68,0.08)] transition-colors duration-200 disabled:opacity-40 cursor-pointer"
+        title="Remove item"
+      >
+        <i className="fa-solid fa-trash text-[0.8rem]" />
+      </button>
+    </div>
+  );
+
   return (
     <div className="flex flex-col gap-6">
       <div>
@@ -421,8 +536,8 @@ export default function CustomOrders() {
           <i className="fa-solid fa-square-plus mr-2 text-[#e21e53]" />
           New Order
         </h3>
-        <form onSubmit={handleSubmit} className="flex flex-col gap-3">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="flex flex-col gap-[0.4rem]">
               <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Client Order #</label>
               <input
@@ -435,42 +550,6 @@ export default function CustomOrders() {
               />
             </div>
             <div className="flex flex-col gap-[0.4rem]">
-              <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Width</label>
-              <input
-                type="number"
-                min="0.01"
-                step="0.01"
-                value={form.width}
-                onChange={(e) => handleChange('width', e.target.value)}
-                disabled={submitting}
-                className={inputClass}
-              />
-            </div>
-            <div className="flex flex-col gap-[0.4rem]">
-              <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Height</label>
-              <input
-                type="number"
-                min="0.01"
-                step="0.01"
-                value={form.height}
-                onChange={(e) => handleChange('height', e.target.value)}
-                disabled={submitting}
-                className={inputClass}
-              />
-            </div>
-            <div className="flex flex-col gap-[0.4rem]">
-              <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Canvas Type</label>
-              <select
-                value={form.canvasType}
-                onChange={(e) => handleChange('canvasType', e.target.value)}
-                disabled={submitting}
-                className={inputClass}
-              >
-                <option value="square">Square</option>
-                <option value="circle">Circle</option>
-              </select>
-            </div>
-            <div className="flex flex-col gap-[0.4rem]">
               <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Deadline</label>
               <input
                 type="date"
@@ -481,6 +560,23 @@ export default function CustomOrders() {
               />
             </div>
           </div>
+
+          <div className="flex flex-col gap-2 border-t border-[#f1f1f1] pt-3">
+            <div className="flex items-center justify-between">
+              <label className="text-[0.8rem] font-bold text-[#1E1E1E]">
+                <i className="fa-solid fa-images mr-1 text-[#e21e53]" />
+                Items
+              </label>
+              <button type="button" onClick={addItemRow} className={secondaryBtnClass}>
+                <i className="fa-solid fa-plus" />
+                Add Item
+              </button>
+            </div>
+            {itemRows.map((row, index) =>
+              renderItemRow(row, index, updateItemRow, removeItemRow, submitting, itemRows.length > 1),
+            )}
+          </div>
+
           <div className="flex flex-col gap-[0.4rem]">
             <label className="text-[0.8rem] font-bold text-[#1E1E1E]">
               Note <span className="font-normal text-[#545454]">(optional)</span>
@@ -525,8 +621,7 @@ export default function CustomOrders() {
                 <thead>
                   <tr className="border-b border-[#e8e8e8] text-[0.72rem] uppercase tracking-[0.05em] text-[#545454]">
                     <th className="py-2 pr-3 font-bold">Order #</th>
-                    <th className="py-2 pr-3 font-bold">Size</th>
-                    <th className="py-2 pr-3 font-bold">Type</th>
+                    <th className="py-2 pr-3 font-bold">Items</th>
                     <th className="py-2 pr-3 font-bold">Note</th>
                     <th className="py-2 pr-3 font-bold">Deadline</th>
                     <th className="py-2 pr-3 font-bold">Status</th>
@@ -537,8 +632,14 @@ export default function CustomOrders() {
                   {pagedOrders.map((order) => (
                     <tr key={order.id} className="border-b border-[#f1f1f1] last:border-0 align-top">
                       <td className="py-3 pr-3 font-bold text-[#1E1E1E] whitespace-nowrap">{order.clientOrderNum}</td>
-                      <td className="py-3 pr-3 whitespace-nowrap text-[#1E1E1E]">{order.width} x {order.height}</td>
-                      <td className="py-3 pr-3 capitalize text-[#545454]">{order.canvasType}</td>
+                      <td className="py-3 pr-3 text-[#1E1E1E]">
+                        {order.items.map((item) => (
+                          <div key={item.id} className="whitespace-nowrap">
+                            {item.quantity}pcs X {item.width}-{item.height}{' '}
+                            <span className="capitalize text-[#545454]">{item.canvasType}</span>
+                          </div>
+                        ))}
+                      </td>
                       <td className="py-3 pr-3 text-[#545454]">{order.note || '—'}</td>
                       <td className="py-3 pr-3 whitespace-nowrap text-[#545454]">
                         {new Date(order.deadline).toLocaleDateString()}
@@ -630,7 +731,7 @@ export default function CustomOrders() {
       {/* ══════════ EDIT ORDER MODAL ══════════ */}
       <Modal open={editOrder != null} onClose={closeEditOrder} title={editOrder ? `Edit ${editOrder.clientOrderNum}` : 'Edit Order'}>
         {editOrder && (
-          <form onSubmit={handleEditSubmit} className="flex flex-col gap-3">
+          <form onSubmit={handleEditSubmit} className="flex flex-col gap-4">
             <div className="flex flex-col gap-[0.4rem]">
               <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Client Order #</label>
               <input
@@ -643,42 +744,14 @@ export default function CustomOrders() {
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="flex flex-col gap-[0.4rem]">
-                <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Width</label>
+                <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Deadline</label>
                 <input
-                  type="number"
-                  min="0.01"
-                  step="0.01"
-                  value={editForm.width}
-                  onChange={(e) => handleEditChange('width', e.target.value)}
+                  type="date"
+                  value={editForm.deadline}
+                  onChange={(e) => handleEditChange('deadline', e.target.value)}
                   disabled={editSubmitting}
                   className={inputClass}
                 />
-              </div>
-              <div className="flex flex-col gap-[0.4rem]">
-                <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Height</label>
-                <input
-                  type="number"
-                  min="0.01"
-                  step="0.01"
-                  value={editForm.height}
-                  onChange={(e) => handleEditChange('height', e.target.value)}
-                  disabled={editSubmitting}
-                  className={inputClass}
-                />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="flex flex-col gap-[0.4rem]">
-                <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Canvas Type</label>
-                <select
-                  value={editForm.canvasType}
-                  onChange={(e) => handleEditChange('canvasType', e.target.value)}
-                  disabled={editSubmitting}
-                  className={inputClass}
-                >
-                  <option value="square">Square</option>
-                  <option value="circle">Circle</option>
-                </select>
               </div>
               <div className="flex flex-col gap-[0.4rem]">
                 <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Status</label>
@@ -694,16 +767,30 @@ export default function CustomOrders() {
                 </select>
               </div>
             </div>
-            <div className="flex flex-col gap-[0.4rem]">
-              <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Deadline</label>
-              <input
-                type="date"
-                value={editForm.deadline}
-                onChange={(e) => handleEditChange('deadline', e.target.value)}
-                disabled={editSubmitting}
-                className={inputClass}
-              />
+
+            <div className="flex flex-col gap-2 border-t border-[#f1f1f1] pt-3">
+              <div className="flex items-center justify-between">
+                <label className="text-[0.8rem] font-bold text-[#1E1E1E]">
+                  <i className="fa-solid fa-images mr-1 text-[#e21e53]" />
+                  Items
+                </label>
+                <button type="button" onClick={addEditItemRow} className={secondaryBtnClass}>
+                  <i className="fa-solid fa-plus" />
+                  Add Item
+                </button>
+              </div>
+              {editItemRows.map((row, index) =>
+                renderItemRow(
+                  row,
+                  index,
+                  updateEditItemRow,
+                  removeEditItemRow,
+                  editSubmitting,
+                  editItemRows.length > 1,
+                ),
+              )}
             </div>
+
             <div className="flex flex-col gap-[0.4rem]">
               <label className="text-[0.8rem] font-bold text-[#1E1E1E]">
                 Note <span className="font-normal text-[#545454]">(optional)</span>
@@ -856,7 +943,7 @@ export default function CustomOrders() {
                       <p className="text-[0.68rem] text-[#ef4444] h-[1em] leading-[1em]">
                         {selectedTask?.pricePerUnit == null && selectedTask && !row.rate
                           ? 'No rate set -- enter one in the Rate field.'
-                          : ' '}
+                          : ' '}
                       </p>
                     </div>
                     <div className="flex flex-col gap-1">

@@ -30,15 +30,16 @@ interface RecipeOption {
 // One row in the "New Daily Entry" form -- kept as an array so the form can
 // hold as many rows as needed and save them all in one go, instead of one
 // entry at a time (same "form is an array of rows" pattern already used for
-// Recipes' Artisan Wages/Materials rows).
+// Recipes' Artisan Wages/Materials rows). Task, artisan(s), and date are
+// picked ONCE for the whole form (state below) -- only product + unit vary
+// row to row, e.g. logging several different products finished by the same
+// artisan(s) doing the same task on the same day.
 interface EntryRow {
-  taskId: string;
-  employeeIds: number[];
   weightKg: string;
   recipeId: string;
 }
 
-const emptyEntryRow: EntryRow = { taskId: '', employeeIds: [], weightKg: '', recipeId: '' };
+const emptyEntryRow: EntryRow = { weightKg: '', recipeId: '' };
 
 interface DailyEntryRecord {
   id: number;
@@ -47,6 +48,7 @@ interface DailyEntryRecord {
   weightKg: number;
   recipeId?: number;
   productName?: string;
+  entryDate?: string;
   createdAt: string;
 }
 
@@ -121,6 +123,12 @@ export default function DailyEntry() {
   const [optionsError, setOptionsError] = useState<string | null>(null);
   const [listError, setListError] = useState<string | null>(null);
 
+  // Task, artisan(s), and date are picked once for the whole form -- every
+  // row saved together shares these same three values.
+  const [taskId, setTaskId] = useState('');
+  const [employeeIds, setEmployeeIds] = useState<number[]>([]);
+  const [entryDate, setEntryDate] = useState(today());
+
   const [entryRows, setEntryRows] = useState<EntryRow[]>([emptyEntryRow]);
 
   const [submitting, setSubmitting] = useState(false);
@@ -135,6 +143,7 @@ export default function DailyEntry() {
   const [editEmployeeIds, setEditEmployeeIds] = useState<number[]>([]);
   const [editWeightKg, setEditWeightKg] = useState('');
   const [editRecipeId, setEditRecipeId] = useState('');
+  const [editEntryDate, setEditEntryDate] = useState(today());
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
 
@@ -197,22 +206,21 @@ export default function DailyEntry() {
   // where someone picks an inactive artisan and only finds out on submit.
   const activeEmployees = employees.filter((e) => e.status === 'active');
 
-  // Whether a given row's task needs a product/recipe picked -- per row,
-  // since each row can log a different task.
-  const isProductApplicableForRow = (row: EntryRow) => {
-    const task = tasks.find((t) => String(t.id) === row.taskId);
-    return !!task && task.requiresProduct;
-  };
+  // Whether the form's single selected task needs a product/recipe picked --
+  // one answer for the whole form now, not per row.
+  const selectedTask = tasks.find((t) => String(t.id) === taskId);
+  const productApplicable = !!selectedTask && selectedTask.requiresProduct;
 
-  const updateRow = (index: number, field: keyof EntryRow, value: EntryRow[keyof EntryRow]) => {
-    setEntryRows((prev) => prev.map((row, i) => (i === index ? { ...row, [field]: value } : row)));
-  };
-
-  const handleRowTaskChange = (index: number, value: string) => {
+  const handleTaskChange = (value: string) => {
     // Changing the task can change whether a product applies at all --
-    // clear whatever was picked so a stale recipe never gets submitted for
-    // a task that no longer needs one.
-    setEntryRows((prev) => prev.map((row, i) => (i === index ? { ...row, taskId: value, recipeId: '' } : row)));
+    // clear whatever every row had picked so a stale recipe never gets
+    // submitted for a task that no longer needs one.
+    setTaskId(value);
+    setEntryRows((prev) => prev.map((row) => ({ ...row, recipeId: '' })));
+  };
+
+  const updateRow = (index: number, field: keyof EntryRow, value: string) => {
+    setEntryRows((prev) => prev.map((row, i) => (i === index ? { ...row, [field]: value } : row)));
   };
 
   const addRow = () => {
@@ -228,22 +236,26 @@ export default function DailyEntry() {
     setFormError(null);
     setSuccess(null);
 
+    if (!taskId) {
+      setFormError('Select a task.');
+      return;
+    }
+    if (employeeIds.length === 0) {
+      setFormError('Select at least one artisan.');
+      return;
+    }
+    if (!entryDate) {
+      setFormError('Select a date.');
+      return;
+    }
     for (let i = 0; i < entryRows.length; i++) {
       const row = entryRows[i];
-      if (!row.taskId) {
-        setFormError(`Row ${i + 1}: select a task.`);
-        return;
-      }
-      if (row.employeeIds.length === 0) {
-        setFormError(`Row ${i + 1}: select at least one artisan.`);
-        return;
-      }
       if (!row.weightKg) {
         setFormError(`Row ${i + 1}: enter a quantity.`);
         return;
       }
-      if (isProductApplicableForRow(row) && !row.recipeId) {
-        setFormError(`Row ${i + 1}: select a product for this task.`);
+      if (productApplicable && !row.recipeId) {
+        setFormError(`Row ${i + 1}: select a product.`);
         return;
       }
     }
@@ -259,10 +271,11 @@ export default function DailyEntry() {
       const row = entryRows[i];
       try {
         await axios.post(`${API_URL}/daily-entries`, {
-          taskId: Number(row.taskId),
-          employeeIds: row.employeeIds,
+          taskId: Number(taskId),
+          employeeIds,
           weightKg: Number(row.weightKg),
-          recipeId: isProductApplicableForRow(row) ? Number(row.recipeId) : undefined,
+          recipeId: productApplicable ? Number(row.recipeId) : undefined,
+          entryDate,
         });
         savedCount++;
       } catch (err) {
@@ -350,6 +363,11 @@ export default function DailyEntry() {
     setEditEmployeeIds(entry.employees.map((e) => e.id));
     setEditWeightKg(String(entry.weightKg));
     setEditRecipeId(entry.recipeId ? String(entry.recipeId) : '');
+    // Fall back to the entry's real createdAt date -- NOT today() -- for old
+    // entries saved before entryDate existed. Defaulting to today here would
+    // silently move an old entry's payout into the current month the moment
+    // someone opens and saves an unrelated edit (e.g. fixing a typo).
+    setEditEntryDate(entry.entryDate ? entry.entryDate.slice(0, 10) : entry.createdAt.slice(0, 10));
     setEditError(null);
   };
 
@@ -387,6 +405,7 @@ export default function DailyEntry() {
         employeeIds: editEmployeeIds,
         weightKg: Number(editWeightKg),
         recipeId: editIsProductApplicable ? Number(editRecipeId) : undefined,
+        entryDate: editEntryDate,
       });
       closeEdit();
       loadEntries();
@@ -424,43 +443,70 @@ export default function DailyEntry() {
 
       {/* New entry form -- full width */}
       <div className={`${cardClass} w-full mb-6`}>
-        <h3 className="text-base font-extrabold border-b border-[#e8e8e8] pb-2 mb-4 text-[#1E1E1E]">
-          <i className="fa-solid fa-square-plus mr-[0.4rem] text-[#e21e53]" />
-          New Daily Entry
-        </h3>
+        <div className="flex items-center justify-between gap-3 border-b border-[#e8e8e8] pb-2 mb-4">
+          <h3 className="text-base font-extrabold text-[#1E1E1E]">
+            <i className="fa-solid fa-square-plus mr-[0.4rem] text-[#e21e53]" />
+            New Daily Entry
+          </h3>
+        </div>
 
         {optionsError && <p className="mb-3 text-[0.8rem] font-semibold text-[#ef4444]">{optionsError}</p>}
 
-        <form onSubmit={handleSubmit} className="flex flex-col gap-3">
-          {entryRows.map((row, index) => {
-            const rowIsProductApplicable = isProductApplicableForRow(row);
-            return (
+        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+          {/* Picked once for the whole batch of rows below */}
+          <div className="flex flex-wrap gap-4 md:items-end rounded-lg border border-[#e8e8e8] bg-[#f8fafc] p-3">
+            <div className="flex flex-col gap-[0.4rem] flex-1 min-w-[180px]">
+              <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Task Name</label>
+              <select
+                value={taskId}
+                onChange={(e) => handleTaskChange(e.target.value)}
+                required
+                disabled={loadingOptions || submitting}
+                className={inputClass}
+              >
+                <option value="" disabled>
+                  Select a task...
+                </option>
+                {tasks.map((task) => (
+                  <option key={task.id} value={task.id}>
+                    {task.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex flex-col gap-[0.4rem] flex-1 min-w-[220px]">
+              <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Select Artisan</label>
+              <MultiSelect
+                options={activeEmployees.map((employee) => ({ id: employee.id, label: employee.name }))}
+                selectedIds={employeeIds}
+                onChange={setEmployeeIds}
+                placeholder="Select artisan(s)..."
+                disabled={loadingOptions || submitting}
+              />
+            </div>
+
+            <div className="flex flex-col gap-[0.4rem] w-full sm:w-[160px]">
+              <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Date</label>
+              <input
+                type="date"
+                value={entryDate}
+                onChange={(e) => setEntryDate(e.target.value)}
+                disabled={submitting}
+                className={inputClass}
+              />
+            </div>
+          </div>
+
+          {/* One row per product -- only these two vary */}
+          <div className="flex flex-col gap-3">
+            {entryRows.map((row, index) => (
               <div
                 key={index}
                 className="flex flex-wrap gap-4 md:items-end rounded-lg border border-[#e8e8e8] bg-[#f8fafc] p-3"
               >
-                <div className="flex flex-col gap-[0.4rem] flex-1 min-w-[180px]">
-                  {index === 0 && <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Task Name</label>}
-                  <select
-                    value={row.taskId}
-                    onChange={(e) => handleRowTaskChange(index, e.target.value)}
-                    required
-                    disabled={loadingOptions || submitting}
-                    className={inputClass}
-                  >
-                    <option value="" disabled>
-                      Select a task...
-                    </option>
-                    {tasks.map((task) => (
-                      <option key={task.id} value={task.id}>
-                        {task.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {rowIsProductApplicable && (
-                  <div className="flex flex-col gap-[0.4rem] flex-1 min-w-[180px]">
+                {productApplicable && (
+                  <div className="flex flex-col gap-[0.4rem] flex-1 min-w-[220px]">
                     {index === 0 && <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Product Name</label>}
                     <select
                       value={row.recipeId}
@@ -481,18 +527,7 @@ export default function DailyEntry() {
                   </div>
                 )}
 
-                <div className="flex flex-col gap-[0.4rem] flex-1 min-w-[180px]">
-                  {index === 0 && <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Select Artisan</label>}
-                  <MultiSelect
-                    options={activeEmployees.map((employee) => ({ id: employee.id, label: employee.name }))}
-                    selectedIds={row.employeeIds}
-                    onChange={(ids) => updateRow(index, 'employeeIds', ids)}
-                    placeholder="Select artisan(s)..."
-                    disabled={loadingOptions || submitting}
-                  />
-                </div>
-
-                <div className="flex flex-col gap-[0.4rem] w-full sm:w-[160px]">
+                <div className="flex flex-col gap-[0.4rem] flex-1 min-w-[160px]">
                   {index === 0 && <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Unit (kg/Pieces)</label>}
                   <input
                     type="number"
@@ -516,8 +551,8 @@ export default function DailyEntry() {
                   <i className="fa-solid fa-trash" />
                 </button>
               </div>
-            );
-          })}
+            ))}
+          </div>
 
           <div className="flex items-center justify-between gap-3">
             <button
@@ -696,6 +731,7 @@ export default function DailyEntry() {
                   <th className="py-2 pr-4 font-bold">Recipe</th>
                   <th className="py-2 pr-4 font-bold">Artisan(s)</th>
                   <th className="py-2 pr-4 font-bold text-center">Unit (Kg/Pieces)</th>
+                  <th className="py-2 pr-4 font-bold">Date</th>
                   <th className="py-2 pr-4 font-bold">Created At</th>
                   <th className="py-2 pr-4 font-bold text-center">Actions</th>
                 </tr>
@@ -709,6 +745,16 @@ export default function DailyEntry() {
                       {entry.employees?.map((emp) => emp.name).join(', ') || '—'}
                     </td>
                     <td className="py-3 pr-4 text-[#545454] text-center">{formatQty(entry.weightKg)}</td>
+                    <td className="py-3 pr-4 text-[#545454] whitespace-nowrap">
+                      {entry.entryDate
+                        ? new Date(entry.entryDate).toLocaleDateString('en-US', {
+                            timeZone: 'UTC',
+                            month: 'short',
+                            day: 'numeric',
+                            year: 'numeric',
+                          })
+                        : '—'}
+                    </td>
                     <td className="py-3 pr-4 text-[#545454]">
                       {new Date(entry.createdAt).toLocaleString('en-US', {
                         timeZone: 'Asia/Dhaka',
@@ -813,6 +859,17 @@ export default function DailyEntry() {
               value={editWeightKg}
               onChange={(e) => setEditWeightKg(e.target.value)}
               required
+              disabled={editSubmitting}
+              className={inputClass}
+            />
+          </div>
+
+          <div className="flex flex-col gap-[0.4rem]">
+            <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Date</label>
+            <input
+              type="date"
+              value={editEntryDate}
+              onChange={(e) => setEditEntryDate(e.target.value)}
               disabled={editSubmitting}
               className={inputClass}
             />

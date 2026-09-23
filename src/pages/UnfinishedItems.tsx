@@ -53,6 +53,9 @@ export default function UnfinishedItems() {
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
+  // Free-text search (product name or SKU) -- on top of, not instead of, the
+  // "Filter by Recipe" dropdown below, for quickly narrowing a long list.
+  const [searchQuery, setSearchQuery] = useState('');
   const [filterRecipeId, setFilterRecipeId] = useState('');
   const [filterCategoryId, setFilterCategoryId] = useState('');
 
@@ -103,14 +106,20 @@ export default function UnfinishedItems() {
     stageStocks.some((s) => s.recipeId === recipe.id),
   );
 
+  const trimmedQuery = searchQuery.trim().toLowerCase();
   const visibleRecipes = recipesWithStock.filter((r) => {
+    if (trimmedQuery) {
+      const haystack = `${r.product} ${r.sku}`.toLowerCase();
+      if (!haystack.includes(trimmedQuery)) return false;
+    }
     if (filterRecipeId && String(r.id) !== filterRecipeId) return false;
     if (filterCategoryId && String(r.category?.id ?? '') !== filterCategoryId) return false;
     return true;
   });
 
-  const filtersActive = filterRecipeId !== '' || filterCategoryId !== '';
+  const filtersActive = trimmedQuery !== '' || filterRecipeId !== '' || filterCategoryId !== '';
   const clearFilters = () => {
+    setSearchQuery('');
     setFilterRecipeId('');
     setFilterCategoryId('');
   };
@@ -132,7 +141,20 @@ export default function UnfinishedItems() {
 
       {!loading && !loadError && recipesWithStock.length > 0 && (
         <div className={`${cardClass} mb-4 flex flex-wrap gap-3 items-end`}>
-          <div className="flex flex-col gap-[0.4rem] w-full sm:w-[260px]">
+          <div className="flex flex-col gap-[0.4rem] w-full sm:w-[240px]">
+            <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Search Recipe</label>
+            <div className="relative">
+              <i className="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-[0.75rem] text-[#545454]" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search by product or SKU..."
+                className={`${inputClass} pl-9`}
+              />
+            </div>
+          </div>
+          <div className="flex flex-col gap-[0.4rem] w-full sm:w-[240px]">
             <label className="text-[0.8rem] font-bold text-[#1E1E1E]">Filter by Recipe</label>
             <select
               value={filterRecipeId}

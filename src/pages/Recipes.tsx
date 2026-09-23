@@ -147,6 +147,11 @@ export default function Recipes() {
   const [rawMaterials, setRawMaterials] = useState<RawMaterialOption[]>([]);
   const [rawMaterialsError, setRawMaterialsError] = useState<string | null>(null);
 
+  // Current average unit price per raw material (from stock batches) --
+  // used only to show each BOM row's cost + the recipe's total material
+  // cost on the cards below; not editable here.
+  const [priceByMaterialId, setPriceByMaterialId] = useState<Record<string, number>>({});
+
   const [categories, setCategories] = useState<CategoryOption[]>([]);
   const [categoriesLoading, setCategoriesLoading] = useState(false);
   const [categoriesError, setCategoriesError] = useState<string | null>(null);
@@ -233,12 +238,28 @@ export default function Recipes() {
     }
   }, []);
 
+  const fetchMaterialPrices = useCallback(async () => {
+    try {
+      const res = await axios.get<{ rawMaterialId: number; averageUnitPrice: number }[]>(
+        `${API_URL}/material-batches/stock-summary`,
+      );
+      setPriceByMaterialId(
+        Object.fromEntries(res.data.map((row) => [row.rawMaterialId, row.averageUnitPrice])),
+      );
+    } catch (err) {
+      // Best-effort -- BOM cost just shows as ৳0 if this fails; nothing else
+      // on the page depends on it.
+      console.error('Failed to load material prices', err);
+    }
+  }, []);
+
   useEffect(() => {
     fetchRecipes();
     fetchTasks();
     fetchRawMaterials();
     fetchCategories();
-  }, [fetchRecipes, fetchTasks, fetchRawMaterials, fetchCategories]);
+    fetchMaterialPrices();
+  }, [fetchRecipes, fetchTasks, fetchRawMaterials, fetchCategories, fetchMaterialPrices]);
 
   const handleAddCategory = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -901,48 +922,71 @@ export default function Recipes() {
 
       {!loading && !listError && filteredRecipes.length > 0 && (
         <div className="grid grid-cols-[repeat(auto-fit,minmax(280px,1fr))] gap-4">
-          {filteredRecipes.map((recipe) => (
+          {filteredRecipes.map((recipe) => {
+            const bomTotal = recipe.materialUsages.reduce(
+              (sum, mu) => sum + mu.quantity * (priceByMaterialId[mu.rawMaterialId] ?? 0),
+              0,
+            );
+            const laborTotal = recipe.taskRates.reduce((sum, tr) => sum + tr.rate, 0);
+            const totalCost = bomTotal + laborTotal;
+            return (
             <div key={recipe.id} className={`${cardClass} flex flex-col justify-between`}>
               <div>
-                <div className="flex items-center justify-between border-b border-[#e8e8e8] pb-3 mb-3">
+                <div className="flex items-start justify-between border-b border-[#e8e8e8] pb-3 mb-3">
                   <div className="flex flex-col gap-1">
                     <h3 className="text-[1.15rem] font-bold text-[#e21e53]">{recipe.product}</h3>
+                    <span className="text-[0.8rem] font-bold text-[#10b981]">
+                      Cost — ৳{totalCost.toFixed(2)}
+                    </span>
+                  </div>
+                  <div className="flex flex-col items-end gap-1">
+                    <span className="rounded-full bg-[rgba(59,130,246,0.1)] text-[#3b82f6] text-[0.7rem] font-bold px-3 py-1">
+                      SKU: {recipe.sku}
+                    </span>
                     {recipe.category && (
                       <span className="w-fit rounded-full bg-[rgba(16,185,129,0.1)] text-[#10b981] text-[0.65rem] font-bold px-2 py-0.5">
                         {recipe.category.name}
                       </span>
                     )}
                   </div>
-                  <span className="rounded-full bg-[rgba(59,130,246,0.1)] text-[#3b82f6] text-[0.7rem] font-bold px-3 py-1">
-                    SKU: {recipe.sku}
-                  </span>
                 </div>
 
                 <p className="text-[0.72rem] font-bold uppercase tracking-[0.05em] text-[#545454] mt-3 mb-2">
-                  Material Consumption (BOM)
+                  Material Consumption (BOM — total amount ৳{' '}
+                  {recipe.materialUsages
+                    .reduce((sum, mu) => sum + mu.quantity * (priceByMaterialId[mu.rawMaterialId] ?? 0), 0)
+                    .toFixed(2)}
+                  )
                 </p>
                 {recipe.materialUsages.length === 0 ? (
                   <p className="text-[0.8rem] font-medium text-[#545454]">No materials assigned yet.</p>
                 ) : (
                   <div className="grid grid-cols-2 gap-2">
-                    {recipe.materialUsages.map((mu) => (
-                      <div
-                        key={mu.id}
-                        className="flex flex-col gap-0.5 rounded-lg border border-[#e8e8e8] bg-[#f8fafc] px-2 py-2 text-[0.8rem] font-semibold text-[#1E1E1E]"
-                      >
-                        <span className="flex items-center gap-[0.35rem]">
-                          <i className="fa-solid fa-cube w-4 text-center text-[#545454]" />
-                          {mu.rawMaterialName}: {mu.quantity} {mu.rawMaterialUnit}
-                        </span>
-                        <span
-                          className={`pl-5 text-[0.68rem] font-bold uppercase tracking-[0.03em] ${
-                            mu.taskName ? 'text-[#545454]' : 'text-[#ef4444]'
-                          }`}
+                    {recipe.materialUsages.map((mu) => {
+                      const unitPrice = priceByMaterialId[mu.rawMaterialId] ?? 0;
+                      const lineCost = mu.quantity * unitPrice;
+                      return (
+                        <div
+                          key={mu.id}
+                          className="flex flex-col gap-0.5 rounded-lg border border-[#e8e8e8] bg-[#f8fafc] px-2 py-2 text-[0.8rem] font-semibold text-[#1E1E1E]"
                         >
-                          {mu.taskName ? `at: ${mu.taskName}` : 'not assigned'}
-                        </span>
-                      </div>
-                    ))}
+                          <span className="flex items-center gap-[0.35rem]">
+                            <i className="fa-solid fa-cube w-4 text-center text-[#545454]" />
+                            {mu.rawMaterialName}: {mu.quantity} {mu.rawMaterialUnit}
+                          </span>
+                          <span className="pl-5 text-[0.7rem] font-bold text-[#10b981]">
+                            ৳{unitPrice.toFixed(2)}/{mu.rawMaterialUnit} = ৳{lineCost.toFixed(2)}
+                          </span>
+                          <span
+                            className={`pl-5 text-[0.68rem] font-bold uppercase tracking-[0.03em] ${
+                              mu.taskName ? 'text-[#545454]' : 'text-[#ef4444]'
+                            }`}
+                          >
+                            {mu.taskName ? `at: ${mu.taskName}` : 'not assigned'}
+                          </span>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
 
@@ -996,7 +1040,8 @@ export default function Recipes() {
                 </button>
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
 

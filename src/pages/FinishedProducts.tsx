@@ -12,6 +12,7 @@ interface Product {
   sku: string;
   costPrice: number;
   stock: number;
+  sellPrice?: number | null;
 }
 
 interface RouteOption {
@@ -77,6 +78,13 @@ export default function FinishedProducts() {
   const [shipmentSubmitting, setShipmentSubmitting] = useState(false);
   const [shipmentFormError, setShipmentFormError] = useState<string | null>(null);
 
+  // Sell price is edited inline per row -- draft text keyed by product id so
+  // typing in one row doesn't touch any other, and unsaved edits survive a
+  // background refresh (only overwritten once that row's save succeeds).
+  const [sellPriceDrafts, setSellPriceDrafts] = useState<Record<number, string>>({});
+  const [savingSellPriceId, setSavingSellPriceId] = useState<number | null>(null);
+  const [sellPriceError, setSellPriceError] = useState<string | null>(null);
+
   const fetchProducts = useCallback(async () => {
     setLoading(true);
     setListError(null);
@@ -112,6 +120,36 @@ export default function FinishedProducts() {
     fetchProducts();
     fetchShipmentOptions();
   }, [fetchProducts, fetchShipmentOptions]);
+
+  const handleSellPriceChange = (productId: number, value: string) => {
+    setSellPriceDrafts((prev) => ({ ...prev, [productId]: value }));
+  };
+
+  const handleSaveSellPrice = async (product: Product) => {
+    const draft = sellPriceDrafts[product.id];
+    const trimmed = (draft ?? '').trim();
+    const sellPrice = trimmed === '' ? null : Number(trimmed);
+    if (sellPrice != null && (Number.isNaN(sellPrice) || sellPrice < 0)) {
+      setSellPriceError(`Enter a valid, non-negative sell price for "${product.name}".`);
+      return;
+    }
+    setSellPriceError(null);
+    setSavingSellPriceId(product.id);
+    try {
+      await axios.patch(`${API_URL}/products/${product.id}/sell-price`, { sellPrice });
+      setSellPriceDrafts((prev) => {
+        const next = { ...prev };
+        delete next[product.id];
+        return next;
+      });
+      fetchProducts();
+    } catch (err) {
+      setSellPriceError(getApiErrorMessage(err, 'Could not reach the server. Check the console.'));
+      console.error('Failed to save sell price', err);
+    } finally {
+      setSavingSellPriceId(null);
+    }
+  };
 
   const openShipmentModal = () => {
     setShipmentForm(emptyShipmentForm);
@@ -291,6 +329,7 @@ export default function FinishedProducts() {
 
         {loading && <p className="text-[0.8rem] font-semibold text-[#545454]">Loading products...</p>}
         {!loading && listError && <p className="text-[0.8rem] font-semibold text-[#ef4444]">{listError}</p>}
+        {sellPriceError && <p className="mb-3 text-[0.8rem] font-semibold text-[#ef4444]">{sellPriceError}</p>}
         {!loading && !listError && products.length === 0 && (
           <p className="text-[0.8rem] font-semibold text-[#545454]">
             No finished products yet -- these get created automatically the first time a Packaging entry
@@ -306,6 +345,7 @@ export default function FinishedProducts() {
                   <th className="py-2 pr-3 text-[0.72rem] font-extrabold uppercase tracking-[0.05em] text-[#545454]">Product</th>
                   <th className="py-2 pr-3 text-[0.72rem] font-extrabold uppercase tracking-[0.05em] text-[#545454]">SKU</th>
                   <th className="py-2 pr-3 text-[0.72rem] font-extrabold uppercase tracking-[0.05em] text-[#545454] text-right">Cost Price</th>
+                  <th className="py-2 pr-3 text-[0.72rem] font-extrabold uppercase tracking-[0.05em] text-[#545454] text-right">Sell Price</th>
                   <th className="py-2 pr-3 text-[0.72rem] font-extrabold uppercase tracking-[0.05em] text-[#545454] text-right">Stock</th>
                   <th className="py-2 pr-3 text-[0.72rem] font-extrabold uppercase tracking-[0.05em] text-[#545454] text-right">Total Value</th>
                   <th className="py-2 pr-3 text-[0.72rem] font-extrabold uppercase tracking-[0.05em] text-[#545454] text-right">Status</th>
@@ -326,6 +366,29 @@ export default function FinishedProducts() {
                       </td>
                       <td className="py-3 pr-3 text-[0.8rem] font-medium text-[#545454]">{p.sku}</td>
                       <td className="py-3 pr-3 text-[0.875rem] font-medium text-[#545454] text-right">৳{p.costPrice.toFixed(2)}</td>
+                      <td className="py-3 pr-3 text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={sellPriceDrafts[p.id] ?? (p.sellPrice != null ? String(p.sellPrice) : '')}
+                            onChange={(e) => handleSellPriceChange(p.id, e.target.value)}
+                            placeholder="—"
+                            disabled={savingSellPriceId === p.id}
+                            className="w-[90px] bg-white border border-[#e8e8e8] text-[#1E1E1E] px-2 py-1 rounded-lg text-[0.8rem] font-medium text-right outline-none focus:border-[#e21e53] disabled:opacity-60"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => handleSaveSellPrice(p)}
+                            disabled={savingSellPriceId === p.id}
+                            title="Save sell price"
+                            className="w-7 h-7 flex items-center justify-center rounded-lg border border-[#e8e8e8] text-[#10b981] hover:bg-[rgba(16,185,129,0.08)] transition-colors duration-200 disabled:opacity-40 cursor-pointer shrink-0"
+                          >
+                            <i className={`fa-solid ${savingSellPriceId === p.id ? 'fa-spinner fa-spin' : 'fa-check'} text-[0.7rem]`} />
+                          </button>
+                        </div>
+                      </td>
                       <td className={`py-3 pr-3 text-[0.9rem] font-extrabold text-right ${inStock ? 'text-[#1E1E1E]' : 'text-[#ef4444]'}`}>
                         {formatQty(p.stock)}
                       </td>

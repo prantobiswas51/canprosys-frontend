@@ -68,8 +68,22 @@ interface WasteStockRow {
   quantityRemaining: number;
 }
 
-interface MaintenanceCostRow {
-  amount: number;
+interface AccountingSummary {
+  month: string;
+  costs: {
+    maintenance: number;
+    wages: number;
+    materials: number;
+    total: number;
+  };
+  wasteRevenue: number;
+  finishedGoods: {
+    totalCostValue: number;
+    pricedCostValue: number;
+    totalSellValue: number;
+    totalProfit: number;
+    missingSellPriceCount: number;
+  };
 }
 
 interface StockItem {
@@ -255,7 +269,7 @@ export default function Dashboard() {
   const [woodStages, setWoodStages] = useState<WoodStageOption[]>([]);
   const [products, setProducts] = useState<ProductRow[]>([]);
   const [wasteStock, setWasteStock] = useState<WasteStockRow[]>([]);
-  const [monthMaintenanceCosts, setMonthMaintenanceCosts] = useState<MaintenanceCostRow[]>([]);
+  const [accountingSummary, setAccountingSummary] = useState<AccountingSummary | null>(null);
 
   useEffect(() => {
     const { from, to } = monthBounds(currentMonth());
@@ -264,7 +278,7 @@ export default function Dashboard() {
       setLoading(true);
       setError(null);
       try {
-        const [empRes, payoutRes, loanRes, matRes, woodRes, stagesRes, productRes, wasteRes, maintenanceRes] =
+        const [empRes, payoutRes, loanRes, matRes, woodRes, stagesRes, productRes, wasteRes, accountingRes] =
           await Promise.all([
             axios.get<EmployeeRow[]>(`${API_URL}/employees`),
             axios.get<PayoutRow[]>(`${API_URL}/payouts`, { params: { month: currentMonth() } }),
@@ -274,7 +288,7 @@ export default function Dashboard() {
             axios.get<WoodStageOption[]>(`${API_URL}/wood-stages`),
             axios.get<ProductRow[]>(`${API_URL}/products`),
             axios.get<WasteStockRow[]>(`${API_URL}/waste-batches/stock`),
-            axios.get<MaintenanceCostRow[]>(`${API_URL}/maintenance-costs`, { params: { month: currentMonth() } }),
+            axios.get<AccountingSummary>(`${API_URL}/accounting/summary`, { params: { month: currentMonth() } }),
           ]);
         setEmployees(empRes.data);
         setMonthPayouts(payoutRes.data);
@@ -284,7 +298,7 @@ export default function Dashboard() {
         setWoodStages(stagesRes.data);
         setProducts(productRes.data);
         setWasteStock(wasteRes.data);
-        setMonthMaintenanceCosts(maintenanceRes.data);
+        setAccountingSummary(accountingRes.data);
       } catch (err) {
         setError(getApiErrorMessage(err, 'Could not reach the server. Check the console.'));
         console.error('Failed to load dashboard data', err);
@@ -365,9 +379,6 @@ export default function Dashboard() {
   const outOfStockProducts = products.filter((p) => (p.stock || 0) <= 0).length;
   const sortedProducts = [...products].sort((a, b) => b.stock * b.costPrice - a.stock * a.costPrice);
   const wasteTypesInStock = wasteStock.filter((w) => w.quantityRemaining > 0).length;
-
-  // ── Operating cost metrics ──
-  const monthMaintenanceTotal = monthMaintenanceCosts.reduce((sum, c) => sum + (c.amount || 0), 0);
 
   const today = new Date();
 
@@ -605,13 +616,69 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* ══ OPERATING COSTS ══ */}
-          <div className="flex flex-col gap-4">
-            <SectionHeader icon="fa-money-bill-transfer" title="Operating Costs" subtitle="Factory overhead -- electricity, internet, meals & more" />
-            <div className="grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-4">
-              <StatCard label="This Month's Maintenance Costs" value={monthMaintenanceTotal} icon="fa-money-bill-transfer" accent="rose" prefix="৳ " decimals={2} />
+          {/* ══ ACCOUNTING ══ */}
+          {accountingSummary && (
+            <div className="flex flex-col gap-4">
+              <SectionHeader
+                icon="fa-money-bill-transfer"
+                title="Accounting"
+                subtitle={`This month's costs & finished-goods profit -- ${accountingSummary.month}`}
+              />
+
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                <div className={cardClass}>
+                  <h3 className="mb-4 text-[0.95rem] font-extrabold text-[#1E1E1E]">
+                    <i className="fa-solid fa-receipt mr-2 text-[#e21e53]" />
+                    This Month's Costs
+                  </h3>
+                  <div className="grid grid-cols-2 gap-3">
+                    <StatCard label="Maintenance" value={accountingSummary.costs.maintenance} icon="fa-screwdriver-wrench" accent="rose" prefix="৳ " decimals={2} />
+                    <StatCard label="Wages" value={accountingSummary.costs.wages} icon="fa-hand-holding-dollar" accent="amber" prefix="৳ " decimals={2} />
+                    <StatCard label="Materials (BOM)" value={accountingSummary.costs.materials} icon="fa-boxes-stacked" accent="blue" prefix="৳ " decimals={2} />
+                    <StatCard label="Total Cost" value={accountingSummary.costs.total} icon="fa-calculator" accent="purple" prefix="৳ " decimals={2} />
+                  </div>
+                </div>
+
+                <div className={cardClass}>
+                  <h3 className="mb-4 text-[0.95rem] font-extrabold text-[#1E1E1E]">
+                    <i className="fa-solid fa-sack-dollar mr-2 text-[#e21e53]" />
+                    Finished Goods
+                  </h3>
+                  <div className="grid grid-cols-2 gap-3">
+                    <StatCard label="Cost Value (Stock)" value={accountingSummary.finishedGoods.totalCostValue} icon="fa-boxes-packing" accent="blue" prefix="৳ " decimals={2} />
+                    <StatCard label="Sell Value (Priced)" value={accountingSummary.finishedGoods.totalSellValue} icon="fa-tags" accent="green" prefix="৳ " decimals={2} />
+                    <StatCard label="Waste Revenue" value={accountingSummary.wasteRevenue} icon="fa-recycle" accent="purple" prefix="৳ " decimals={2} />
+                    <StatCard
+                      label="Estimated Profit"
+                      value={accountingSummary.finishedGoods.totalProfit}
+                      icon="fa-chart-line"
+                      accent={accountingSummary.finishedGoods.totalProfit >= 0 ? 'green' : 'rose'}
+                      prefix="৳ "
+                      decimals={2}
+                    />
+                    <StatCard
+                      label="Missing Sell Price"
+                      value={accountingSummary.finishedGoods.missingSellPriceCount}
+                      icon="fa-triangle-exclamation"
+                      accent="amber"
+                      warn
+                    />
+                  </div>
+                  {accountingSummary.finishedGoods.missingSellPriceCount > 0 && (
+                    <p className="mt-3 text-[0.75rem] text-[#545454]">
+                      <i className="fa-solid fa-circle-info mr-1 text-[#f59e0b]" />
+                      {accountingSummary.finishedGoods.missingSellPriceCount} product(s) in stock have no sell price set,
+                      so they're excluded from sell value & profit above.{' '}
+                      <Link to="/finished-products" className="font-bold text-[#e21e53] hover:underline">
+                        Set them now
+                      </Link>
+                      .
+                    </p>
+                  )}
+                </div>
+              </div>
             </div>
-          </div>
+          )}
         </>
       )}
     </div>
